@@ -1,0 +1,38 @@
+# Sample YAML Preset File - Dictionary Format (Format C)
+# This file demonstrates nested dictionary structure
+# All presets from nested structures will be flattened into a single list
+
+camera_angles:
+  close_up:
+    - front view, low-angle shot, close-up
+    - front-right quarter view, low-angle shot, close-up
+    - right side view, low-angle shot, close-up
+    - back-right quarter view, low-angle shot, close-up
+    - back view, low-angle shot, close-up
+  
+  medium_shot:
+    - front view, eye-level shot, medium shot
+    - front-right quarter view, eye-level shot, medium shot
+    - right side view, eye-level shot, medium shot
+    - back view, eye-level shot, medium shot
+  
+  wide_shot:
+    - front view, high-angle shot, wide shot
+    - right side view, high-angle shot, wide shot
+    - back view, high-angle shot, wide shot
+
+lighting_setups:
+  natural:
+    - golden hour lighting, warm tones, soft shadows
+    - overcast daylight, diffused light, minimal shadows
+    - sunset lighting, orange hues, long shadows
+  
+  studio:
+    - three-point lighting, neutral balance, controlled shadows
+    - high-key lighting, bright and even, minimal shadows
+    - low-key lighting, dramatic contrast, deep shadows
+  
+  dramatic:
+    - side lighting, high contrast, strong shadows
+    - backlighting, rim light, silhouette effect
+    - spotlight, focused beam, dark surroundings

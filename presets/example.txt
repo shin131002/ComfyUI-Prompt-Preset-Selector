@@ -1,0 +1,26 @@
+# Example Preset File
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+
+# This is a simple example showing how to format preset files
+# Add one preset per line
+
+# Basic examples
+example preset 1
+example preset 2
+example preset 3
+
+# You can organize presets with comments
+# Section 1: Simple presets
+simple text preset
+another simple preset
+
+# Section 2: Presets with commas
+preset with, multiple, parts
+another preset, with commas
+
+# Section 3: LoRA examples (if using for LoRA triggers)
+# <lora:model_name:0.8>, style description
+# <lora:another_model:1.0>, different style
+
+# Feel free to delete this file and create your own!

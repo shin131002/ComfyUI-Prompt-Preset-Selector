@@ -1,0 +1,13 @@
+# Sample YAML Preset File - Flat List Format (Format B)
+# This format is just a YAML list at the root level
+
+- front view, low-angle shot, close-up
+- front-right quarter view, low-angle shot, close-up
+- right side view, low-angle shot, close-up
+- back-right quarter view, low-angle shot, close-up
+- back view, low-angle shot, close-up
+- front view, eye-level shot, medium shot
+- right side view, eye-level shot, medium shot
+- back view, eye-level shot, medium shot
+- front view, high-angle shot, wide shot
+- right side view, high-angle shot, wide shot

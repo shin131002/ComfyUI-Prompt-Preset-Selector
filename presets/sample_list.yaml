@@ -1,0 +1,12 @@
+# Sample YAML Preset File - Presets List Format (Format A)
+# This format uses a 'presets' key with a list of items
+
+presets:
+  - front view, low-angle shot, close-up
+  - back view, low-angle shot, close-up
+  - side view, eye-level shot, medium shot
+  - overhead view, high-angle shot, wide shot
+  - three-quarter view, eye-level shot, close-up
+  - golden hour lighting, warm tones, soft shadows
+  - studio lighting, three-point setup, neutral balance
+  - dramatic side lighting, high contrast, deep shadows

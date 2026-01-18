@@ -1,0 +1,18 @@
+# Sample YAML with space-containing keys
+"camera angles":
+  "close up":
+    - front view, low-angle shot, close-up
+    - back view, low-angle shot, close-up
+  
+  "wide shot":
+    - front view, high-angle shot, wide shot
+    - back view, high-angle shot, wide shot
+
+"lighting setup":
+  natural:
+    - golden hour lighting, warm tones
+    - overcast daylight, soft shadows
+  
+  artificial:
+    - studio lighting, three-point setup
+    - spotlight, dramatic shadows

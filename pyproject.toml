@@ -1,0 +1,21 @@
+[project]
+name = "comfyui-prompt-preset-selector"
+description = "Flexible preset selector with YAML support, advanced keyword filtering, and hierarchical key search"
+version = "1.0.0"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6.0"]
+
+[project.urls]
+Repository = "https://github.com/shin131002/ComfyUI-Prompt-Preset-Selector"
+Documentation = "https://github.com/shin131002/ComfyUI-Prompt-Preset-Selector#readme"
+
+[tool.comfy]
+PublisherId = "konohana"
+DisplayName = "Prompt Preset Selector"
+Icon = ""
+
+[tool.comfy.Tags]
+category = ["text", "utility", "workflow"]
