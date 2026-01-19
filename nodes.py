@@ -290,6 +290,27 @@ class PromptPresetSelector:
             result.append(f"{i}: {line}")
         return "\n".join(result)
     
+    def strip_key_hierarchy(self, text):
+        """
+        Remove YAML key hierarchy prefix from preset text
+        Examples:
+          "camera_angles:close_up: front view" -> "front view"
+          "lighting: golden hour" -> "golden hour"
+          "no keys here" -> "no keys here"
+        """
+        # Find the last occurrence of ": " which separates keys from content
+        # Keys are in format "key1:key2:key3: content"
+        parts = text.split(': ', 1)
+        if len(parts) == 2:
+            # Check if the first part looks like key hierarchy (contains : or is single word)
+            key_part = parts[0]
+            if ':' in key_part or (key_part and not ' ' in key_part):
+                # This looks like "key:" or "key1:key2:", return the content part
+                return parts[1]
+        
+        # No key hierarchy found, return as-is
+        return text
+    
     def select_preset(self, preset_file, absolute_path, keyword, keyword_mode, selection_mode, preset_index, seed):
         """Main selection logic with support for absolute paths"""
         
@@ -380,7 +401,11 @@ class PromptPresetSelector:
         # Info output shows selection details with ORIGINAL index
         info = f"Selected: {original_index}: {selected_text}\nMode: {selection_mode}\nFiltered: {len(filtered_items)}/{len(all_lines)} presets"
         
-        return (selected_text, preset_list, info)
+        # Strip key hierarchy from text output (for actual prompt use)
+        # Keep full text with keys in preset_list and info (for reference)
+        output_text = self.strip_key_hierarchy(selected_text)
+        
+        return (output_text, preset_list, info)
 
 
 # Register the node
