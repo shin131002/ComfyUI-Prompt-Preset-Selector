@@ -5,6 +5,7 @@
 外部ファイルからテキストプリセットを選択できる、柔軟なComfyUIノードです。フィルタリング機能を備え、カメラアングル、服装、ライティング設定、キャラクターデータベースなど、あらゆるテキストベースのプリセット管理に最適です。
 
 ![Prompt Preset Selectorワークフロー例](./images/sample_workflow.webp)
+![Prompt Preset Selector with Wildcardワークフロー例](./images/sample_workflow_wc.webp)
 
 ## 機能
 
@@ -13,10 +14,25 @@
 - 📝 **複数のYAML形式対応**: リスト、ネスト辞書、フラット形式に対応
 - 🔍 **高度なキーワードフィルタリング**: キーワードの包含・除外、フレーズ検索に対応
 - 🎲 **複数の選択モード**: Manual、Sequential、Sequential (continue)、Random
+- 🎰 **Wildcard展開機能**: `{A|B|C}`、`__filename__`、`{__key__|__key__}`構文に対応
+- 🔄 **ComfyUI-Impact-Pack連携**: wildcardsフォルダとの互換性
 - 📝 **簡単な編集**: 任意のテキストエディタでプリセットを編集可能（Pythonコードの変更不要）
 - 🗂️ **複数のプリセットファイル**: カテゴリ別にプリセットを整理
 - 💬 **コメント対応**: プリセットファイルにコメントや空行を追加可能
 - 🔄 **動的読み込み**: プリセットファイル編集時にComfyUIの再起動不要
+
+## ノード種類
+
+このノードには2つのバージョンがあります：
+
+### Prompt Preset Selector
+基本的なプリセット選択機能を提供。Wildcard展開は不要な場合に使用。
+
+### Prompt Preset Selector (Wildcard)
+Wildcard展開機能付きバージョン。以下の構文に対応：
+- `{A|B|C}` - 選択肢から1つを選択
+- `__filename__` - wildcardsフォルダ内のファイルから1行を読み込み
+- `{__key__|__key__}` - YAMLファイル内のキーから内容を選択（Impact Pack形式）
 
 ## インストール
 
@@ -43,13 +59,23 @@ pip install pyyaml
 
 ### 基本的な使い方
 
-1. ワークフローに **"Prompt Preset Selector"** ノードを追加
+1. ワークフローに **"Prompt Preset Selector"** または **"Prompt Preset Selector (Wildcard)"** ノードを追加
 2. **オプションA**: ドロップダウンからプリセットファイルを選択（例：`camera_angles.txt`）
    **オプションB**: `absolute_path`フィールドに絶対パスを入力（例：`/home/user/my_presets/styles.yaml`）
 3. 実行モードを選択
 4. `text`出力をプロンプトノードに接続
 
 **注意**: `absolute_path`が指定されている場合、`preset_file`ドロップダウンより優先されます。
+
+### ファイルの場所
+
+プリセットファイルは以下の場所から読み込まれます（優先順位順）：
+
+1. **絶対パス指定** - `absolute_path`フィールドに記入された場合
+2. **presetsフォルダ** - `ComfyUI/custom_nodes/ComfyUI-Prompt-Preset-Selector/presets/`
+3. **wildcardsフォルダ** - `ComfyUI/custom_nodes/ComfyUI-Impact-Pack/wildcards/`（Impact Packインストール時）
+
+ドロップダウンには、presetsフォルダとwildcardsフォルダの両方のファイルが表示されます（重複は除外）。
 
 ### 絶対パスの使用
 
@@ -62,6 +88,72 @@ C:\Users\YourName\Documents\presets\lighting.yml  (Windows)
 ```
 
 対応ファイル形式：`.txt`、`.yaml`、`.yml`
+
+### Wildcard機能（Wildcard版ノードのみ）
+
+#### enable_wildcardパラメータ
+- `true`（デフォルト）: Wildcard構文を展開
+- `false`: Wildcard構文をそのままテキストとして出力
+
+基本的に`true`のままで問題ありません。Wildcard記法がない場合は何も起きず、通常通りテキストが出力されます。
+
+#### サポートされるWildcard構文
+
+##### 1. 選択肢展開: `{A|B|C}`
+```
+{red|blue|green} dress
+→ "red dress"、"blue dress"、または "green dress"
+```
+
+ネスト対応：
+```
+{red|{dark|light} blue} dress
+→ "red dress"、"dark blue dress"、または "light blue dress"
+```
+
+##### 2. ファイル参照: `__filename__`
+`presets/colors.txt` または `wildcards/colors.txt` の内容を参照：
+```
+__colors__ dress
+→ colors.txtの1行をランダムに選択して展開
+```
+
+ファイル検索順序：
+1. `presets/colors.txt`
+2. `wildcards/colors.txt`（presetsになければ）
+
+##### 3. YAMLキー選択: `{__key1__|__key2__}`
+YAMLファイル内のキーから内容を選択（Impact Pack形式）：
+
+```yaml
+characters:
+  heroes:
+    - superman, cape, blue suit
+    - batman, dark costume, mask
+  villains:
+    - joker, purple suit, green hair
+    - riddler, question mark, green suit
+```
+
+使用例：
+```
+{__heroes__|__villains__}
+→ heroesまたはvillainsキーの内容から1つを選択
+```
+
+**重要**: この構文は、選択されたプリセットファイル内のキーを参照します。
+
+#### Selection Modeとwildcard展開の関係
+
+| selection_mode | プリセット選択 | wildcard展開 |
+|---|---|---|
+| Manual | preset_indexで指定 | ランダム（seedベース） |
+| Random | ランダム（seedベース） | ランダム（seedベース） |
+| Sequential | preset_indexから順番 | シーケンシャル |
+| Sequential (continue) | 前回の続きから | シーケンシャル |
+
+**シーケンシャル展開**: wildcardの選択肢を順番に使用（次回実行時は次の選択肢）
+**ランダム展開**: seedに基づいて毎回選択
 
 ### YAMLファイル形式
 
@@ -169,6 +261,37 @@ camera_angles:close_up:     → 完全パス（ANDモードでスペース区切
 "camera angles" "close up"  → 両方のキーが存在（ANDモード）
 ```
 
+**⚠️ Wildcard選択肢の除外方法**:
+
+ネストYAML構造でwildcard選択肢（`{__key1__|__key2__}`）を含む行がキーワード検索に引っかかる場合：
+
+```yaml
+characters:
+  all:
+    - {__heroes__|__villains__}
+  heroes:
+    - superman, cape, blue suit
+  villains:
+    - joker, purple suit
+```
+
+キーワード「heroes」で検索すると、`all`行も含まれてしまいます（wildcard内に「heroes」が含まれるため）。
+
+**解決策**: コロン `:` を含めて検索
+```
+キーワード: heroes:
+```
+
+これにより、キー階層として検索され、wildcard選択肢の行は除外されます：
+- ❌ `all: {...}` → マッチしない（「heroes:」という形式ではない）
+- ✅ `heroes: superman, cape...` → マッチする
+
+**その他の方法**:
+```
+キーワード: heroes -all
+```
+除外キーワードを使って`all`を明示的に除外。
+
 **除外**（マイナス接頭辞使用）:
 ```
 front -wide          → "front"を含み、"wide"を除外
@@ -198,6 +321,7 @@ camera_angles: -wide_shot:  → キーフィルタ + キー除外
 | `camera_angles:` | AND | camera_anglesキー配下のすべてのプリセット（YAML） |
 | `"close up":` | AND | "close up"キーを持つすべてのプリセット（YAML、キー内スペース） |
 | `lighting: -dramatic:` | AND | lightingキーのプリセット、dramaticキーを除外 |
+| `heroes:` | AND | heroesキーのみ（wildcard選択肢`{__heroes__|...}`を除外） |
 
 ### カスタムプリセットの作成
 
@@ -261,25 +385,68 @@ presets:
 
 ## ノードパラメータ
 
+### Prompt Preset Selector（基本版）
+
 | パラメータ | 型 | 説明 |
 |-----------|------|-------------|
-| `preset_file` | ドロップダウン | presetsディレクトリから使用するファイルを選択 |
+| `preset_file` | ドロップダウン | presetsまたはwildcardsディレクトリから使用するファイルを選択 |
 | `absolute_path` | 文字列 | オプション：プリセットファイルへの絶対パス（preset_fileより優先） |
 | `keyword` | 文字列 | フィルタリング用キーワード（フレーズと除外に対応） |
 | `keyword_mode` | ドロップダウン | フィルタモード：OFF、AND、OR |
-| `execution_mode` | ドロップダウン | プリセットの選択方法：Manual、Sequential、Sequential (continue)、Random |
+| `selection_mode` | ドロップダウン | プリセットの選択方法：Manual、Sequential、Sequential (continue)、Random |
 | `preset_index` | 整数 | Manual/Sequentialモードの開始インデックス（0始まり） |
 | `seed` | 整数 | 再現可能なランダム選択用のランダムシード |
+
+### Prompt Preset Selector (Wildcard)（Wildcard版）
+
+基本版のすべてのパラメータに加えて：
+
+| パラメータ | 型 | 説明 |
+|-----------|------|-------------|
+| `enable_wildcard` | ブール値 | wildcard展開のON/OFF（デフォルト：true） |
 
 ## ノード出力
 
 | 出力 | 型 | 説明 |
 |--------|------|-------------|
-| `text` | STRING | 選択されたプリセットテキスト |
+| `text` | STRING | 選択されたプリセットテキスト（wildcard展開済み） |
 | `preset_list` | STRING | すべての利用可能なプリセットの番号付きリスト（参照用） |
-| `selected_info` | STRING | 選択の詳細（インデックス、モード、フィルタ統計） |
+| `selected_info` | STRING | 選択の詳細（インデックス、モード、フィルタ統計、wildcard展開情報） |
 
 ## 使用例
+
+### Wildcard活用例
+
+#### 動的キャラクター選択
+```yaml
+characters:
+  all_characters:
+    - {__heroes__|__villains__|__sidekicks__}
+  heroes:
+    - superman, red cape, blue suit
+    - batman, dark costume, utility belt
+  villains:
+    - joker, purple suit, green hair
+  sidekicks:
+    - robin, red vest, yellow cape
+```
+
+`all_characters`を選択すると、3つのカテゴリからランダムに選択され、さらにそのカテゴリ内からキャラクターが選択されます。
+
+#### 色とスタイルの組み合わせ
+presetsフォルダに`colors.txt`を作成：
+```txt
+red
+blue
+green
+yellow
+```
+
+プリセット：
+```
+__colors__ {dress|suit|jacket}
+→ "red dress"、"blue suit"、"green jacket"など
+```
 
 ### プロンプトライブラリとして使用
 
@@ -393,6 +560,7 @@ keyword: professional
 Selected: 5: front view, eye-level shot, close-up
 Mode: Sequential (continue)
 Filtered: 24/96 presets
+[Wildcards expanded: sequential]
 ```
 
 ### バッチ生成
@@ -407,6 +575,12 @@ Filtered: 24/96 presets
 1. Randomモードを使用
 2. 良い結果が得られたらseed値をメモ
 3. 同じseedを使用して完全に再現
+
+### Wildcard使用のコツ
+- `enable_wildcard=true`を推奨（wildcard記法がなければ通常通り動作）
+- Sequential modeでwildcardもシーケンシャルに展開
+- `{__key__|__key__}`は同じYAMLファイル内のキーを参照
+- `__filename__`はpresetsとwildcardsフォルダの両方を検索
 
 ## トラブルシューティング
 
@@ -431,6 +605,16 @@ A:
 - Windowsでもフォワードスラッシュ`/`を使用（またはバックスラッシュをエスケープ`\\`）
 - ファイルが対応する拡張子を持つか確認：`.txt`、`.yaml`、`.yml`
 - ファイルの読み取り権限があるか確認
+
+**Q: Wildcardが展開されない？**
+A: 
+- `enable_wildcard`が`true`になっているか確認
+- Wildcard版ノード（"Prompt Preset Selector (Wildcard)"）を使用しているか確認
+- `__filename__`の場合、ファイルがpresetsまたはwildcardsフォルダに存在するか確認
+- `{__key__|__key__}`の場合、キーが選択されたYAMLファイル内に存在するか確認
+
+**Q: Wildcard選択肢がフィルタに含まれてしまう？**
+A: キーワードにコロン`:`を付けて検索してください。例：`heroes:`ではなく`heroes`で検索すると、`{__heroes__|...}`もマッチしてしまいます。コロンを付けることでキー階層として検索され、wildcard選択肢を除外できます。
 
 **Q: YAMLネスト辞書の順序が違う？**
 A: Python辞書は挿入順序を維持（Python 3.7+）しますが、変換処理は構造を走査します。順序はYAML構造の走査に依存します。
@@ -463,4 +647,3 @@ A: Python辞書は挿入順序を維持（Python 3.7+）しますが、変換処
 ## ライセンス
 
 MIT License - 自由に使用、変更、配布できます。
-

@@ -4,7 +4,8 @@
 
 A flexible ComfyUI node for selecting text presets from external files with advanced filtering capabilities. Perfect for managing camera angles, clothing descriptions, lighting setups, character databases, or any text-based presets.
 
-![Prompt Preset Selector wWorkFlow sample](./images/sample_workflow.webp)
+![Prompt Preset Selector Workflow sample](./images/sample_workflow.webp)
+![Prompt Preset Selector with Wildcard Workflow sample](./images/sample_workflow_wc.webp)
 
 ## Features
 
@@ -13,10 +14,25 @@ A flexible ComfyUI node for selecting text presets from external files with adva
 - 📝 **Multiple YAML Formats**: Supports list, nested dict, and flat formats
 - 🔍 **Advanced Keyword Filtering**: Include/exclude keywords with phrase support
 - 🎲 **Multiple Selection Modes**: Manual, Sequential, Sequential (continue), Random
+- 🎰 **Wildcard Expansion**: Supports `{A|B|C}`, `__filename__`, and `{__key__|__key__}` syntax
+- 🔄 **ComfyUI-Impact-Pack Integration**: Compatible with wildcards folder
 - 📝 **Easy Editing**: Edit presets with any text editor - no need to touch Python code
 - 🗂️ **Multiple Preset Files**: Organize presets by category
 - 💬 **Comment Support**: Add comments and empty lines in preset files for organization
 - 🔄 **Dynamic Loading**: No ComfyUI restart needed when editing preset files
+
+## Node Types
+
+This extension provides two versions of the node:
+
+### Prompt Preset Selector
+Basic preset selection functionality. Use when wildcard expansion is not needed.
+
+### Prompt Preset Selector (Wildcard)
+Enhanced version with wildcard expansion support:
+- `{A|B|C}` - Select one option from choices
+- `__filename__` - Load a line from a file in the wildcards folder
+- `{__key__|__key__}` - Select content from YAML keys (Impact Pack format)
 
 ## Installation
 
@@ -43,13 +59,23 @@ Note: PyYAML is usually already installed in most environments. The node will di
 
 ### Basic Usage
 
-1. Add the **"Prompt Preset Selector"** node to your workflow
+1. Add **"Prompt Preset Selector"** or **"Prompt Preset Selector (Wildcard)"** node to your workflow
 2. **Option A**: Select a preset file from the dropdown (e.g., `camera_angles.txt`)
    **Option B**: Enter an absolute path in the `absolute_path` field (e.g., `/home/user/my_presets/styles.yaml`)
 3. Choose an execution mode
 4. Connect the `text` output to your prompt node
 
 **Note**: If `absolute_path` is provided, it takes priority over the `preset_file` dropdown.
+
+### File Locations
+
+Preset files are loaded from the following locations (in priority order):
+
+1. **Absolute path** - When specified in the `absolute_path` field
+2. **presets folder** - `ComfyUI/custom_nodes/ComfyUI-Prompt-Preset-Selector/presets/`
+3. **wildcards folder** - `ComfyUI/custom_nodes/ComfyUI-Impact-Pack/wildcards/` (when Impact Pack is installed)
+
+The dropdown displays files from both the presets and wildcards folders (duplicates are excluded).
 
 ### Using Absolute Paths
 
@@ -62,6 +88,72 @@ C:\Users\YourName\Documents\presets\lighting.yml  (Windows)
 ```
 
 Supported file types: `.txt`, `.yaml`, `.yml`
+
+### Wildcard Features (Wildcard Node Only)
+
+#### enable_wildcard Parameter
+- `true` (default): Expand wildcard syntax
+- `false`: Output wildcard syntax as plain text
+
+Generally, keeping it at `true` is recommended. If there's no wildcard syntax, it will output text normally.
+
+#### Supported Wildcard Syntax
+
+##### 1. Choice Expansion: `{A|B|C}`
+```
+{red|blue|green} dress
+→ "red dress", "blue dress", or "green dress"
+```
+
+Supports nesting:
+```
+{red|{dark|light} blue} dress
+→ "red dress", "dark blue dress", or "light blue dress"
+```
+
+##### 2. File Reference: `__filename__`
+References content from `presets/colors.txt` or `wildcards/colors.txt`:
+```
+__colors__ dress
+→ Expands to a random line from colors.txt
+```
+
+File search order:
+1. `presets/colors.txt`
+2. `wildcards/colors.txt` (if not found in presets)
+
+##### 3. YAML Key Selection: `{__key1__|__key2__}`
+Select content from keys within a YAML file (Impact Pack format):
+
+```yaml
+characters:
+  heroes:
+    - superman, cape, blue suit
+    - batman, dark costume, mask
+  villains:
+    - joker, purple suit, green hair
+    - riddler, question mark, green suit
+```
+
+Usage example:
+```
+{__heroes__|__villains__}
+→ Selects one item from either heroes or villains keys
+```
+
+**Important**: This syntax references keys within the selected preset file.
+
+#### Selection Mode and Wildcard Expansion
+
+| selection_mode | Preset Selection | Wildcard Expansion |
+|---|---|---|
+| Manual | Uses preset_index | Random (seed-based) |
+| Random | Random (seed-based) | Random (seed-based) |
+| Sequential | Sequential from preset_index | Sequential |
+| Sequential (continue) | Continues from last position | Sequential |
+
+**Sequential expansion**: Uses wildcard options in order (next option on next execution)
+**Random expansion**: Selects based on seed each time
 
 ### YAML File Formats
 
@@ -169,6 +261,37 @@ camera_angles:close_up:     → Exact path (requires space as separator in AND m
 "camera angles" "close up"  → Both keys present (AND mode)
 ```
 
+**⚠️ Excluding Wildcard Choice Lines**:
+
+When using nested YAML structures, wildcard choice lines (`{__key1__|__key2__}`) may match keyword searches:
+
+```yaml
+characters:
+  all:
+    - {__heroes__|__villains__}
+  heroes:
+    - superman, cape, blue suit
+  villains:
+    - joker, purple suit
+```
+
+Searching for "heroes" will also include the `all` line (because "heroes" appears in the wildcard).
+
+**Solution**: Include the colon `:` in your search
+```
+Keyword: heroes:
+```
+
+This searches as a key hierarchy, excluding wildcard choice lines:
+- ❌ `all: {...}` → No match (not in "heroes:" format)
+- ✅ `heroes: superman, cape...` → Match
+
+**Alternative**:
+```
+Keyword: heroes -all
+```
+Use exclusion keywords to explicitly exclude `all`.
+
 **Exclusion** (use minus prefix):
 ```
 front -wide          → Include "front", exclude "wide"
@@ -198,6 +321,7 @@ camera_angles: -wide_shot:  → Key filter + key exclusion
 | `camera_angles:` | AND | All presets under camera_angles key (YAML) |
 | `"close up":` | AND | All presets with "close up" key (YAML, spaces in key) |
 | `lighting: -dramatic:` | AND | lighting key presets, excluding dramatic key |
+| `heroes:` | AND | Only heroes key (excludes wildcard choice `{__heroes__|...}`) |
 
 ### Creating Custom Presets
 
@@ -245,7 +369,7 @@ presets:
 4. Refresh ComfyUI or restart
 5. Your new preset file will appear in the dropdown
 
-## Preset File Format
+## Preset File Formats
 
 ### Text Files (.txt)
 - **One preset per line**
@@ -259,38 +383,70 @@ presets:
 - **Comments supported** using `#`
 - **UTF-8 encoding** supported
 
-Example:
-```txt
-# Camera Angles - Close Up Shots
-front view, low-angle shot, close-up
-side view, eye-level shot, close-up
-
-# Camera Angles - Wide Shots  
-front view, low-angle shot, wide shot
-back view, high-angle shot, wide shot
-```
-
 ## Node Parameters
+
+### Prompt Preset Selector (Basic)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `preset_file` | Dropdown | Select which file to use from presets directory |
+| `preset_file` | Dropdown | Select which file to use from presets or wildcards directory |
 | `absolute_path` | String | Optional: Absolute path to preset file (overrides preset_file) |
 | `keyword` | String | Keywords for filtering (supports phrases and exclusions) |
 | `keyword_mode` | Dropdown | Filter mode: OFF, AND, OR |
-| `execution_mode` | Dropdown | How to select presets: Manual, Sequential, Sequential (continue), Random |
+| `selection_mode` | Dropdown | How to select presets: Manual, Sequential, Sequential (continue), Random |
 | `preset_index` | Integer | Starting index (0-based) for Manual/Sequential modes |
 | `seed` | Integer | Random seed for reproducible random selection |
+
+### Prompt Preset Selector (Wildcard)
+
+All parameters from the basic version, plus:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `enable_wildcard` | Boolean | Enable/disable wildcard expansion (default: true) |
 
 ## Node Outputs
 
 | Output | Type | Description |
 |--------|------|-------------|
-| `text` | STRING | The selected preset text |
+| `text` | STRING | The selected preset text (with wildcards expanded) |
 | `preset_list` | STRING | Numbered list of all available presets (for reference) |
-| `selected_info` | STRING | Details about selection (index, mode, filter stats) |
+| `selected_info` | STRING | Details about selection (index, mode, filter stats, wildcard expansion info) |
 
 ## Example Use Cases
+
+### Wildcard Usage Examples
+
+#### Dynamic Character Selection
+```yaml
+characters:
+  all_characters:
+    - {__heroes__|__villains__|__sidekicks__}
+  heroes:
+    - superman, red cape, blue suit
+    - batman, dark costume, utility belt
+  villains:
+    - joker, purple suit, green hair
+  sidekicks:
+    - robin, red vest, yellow cape
+```
+
+Selecting `all_characters` will randomly choose from 3 categories, then select a character from that category.
+
+#### Color and Style Combinations
+Create `colors.txt` in the presets folder:
+```txt
+red
+blue
+green
+yellow
+```
+
+Preset:
+```
+__colors__ {dress|suit|jacket}
+→ "red dress", "blue suit", "green jacket", etc.
+```
 
 ### Prompt Library Management
 
@@ -381,29 +537,6 @@ keyword: professional
 → Access centralized preset library
 ```
 
-### Style Combinations
-Randomly select styles while excluding certain types:
-```txt
-# styles.txt
-cyberpunk style, neon lights, dark atmosphere
-fantasy style, magical elements, vibrant colors
-realistic style, photographic quality, detailed
-minimalist style, simple shapes, clean lines
-```
-```
-Keyword: style -minimalist
-Mode: Random
-→ Randomly picks any style except minimalist
-```
-
-### Clothing with Constraints
-Find specific clothing types:
-```
-Keyword: casual -formal
-Mode: OR
-→ Gets casual wear, excludes any formal items
-```
-
 ### LoRA Combinations
 ```txt
 <lora:style1:0.8>, anime style, vibrant colors
@@ -427,6 +560,7 @@ Shows execution details like:
 Selected: 5: front view, eye-level shot, close-up
 Mode: Sequential (continue)
 Filtered: 24/96 presets
+[Wildcards expanded: sequential]
 ```
 
 ### Batch Generation
@@ -441,6 +575,12 @@ For random selection:
 1. Use Random mode
 2. Note the seed value when you get good results
 3. Use the same seed to reproduce exactly
+
+### Wildcard Tips
+- Keep `enable_wildcard=true` recommended (no effect if no wildcard syntax exists)
+- Sequential mode expands wildcards sequentially too
+- `{__key__|__key__}` references keys within the same YAML file
+- `__filename__` searches both presets and wildcards folders
 
 ## Troubleshooting
 
@@ -465,6 +605,16 @@ A:
 - Use forward slashes `/` even on Windows (or escaped backslashes `\\`)
 - Ensure file has supported extension: `.txt`, `.yaml`, or `.yml`
 - Verify you have read permissions for the file
+
+**Q: Wildcards not expanding?**
+A: 
+- Check that `enable_wildcard` is set to `true`
+- Make sure you're using the Wildcard version node ("Prompt Preset Selector (Wildcard)")
+- For `__filename__`, verify the file exists in presets or wildcards folder
+- For `{__key__|__key__}`, verify the keys exist in the selected YAML file
+
+**Q: Wildcard choice lines included in filter results?**
+A: Include the colon `:` in your keyword search. For example, searching for `heroes` will also match `{__heroes__|...}`, but searching for `heroes:` will only match actual key hierarchies and exclude wildcard choice lines.
 
 **Q: YAML nested dict returns wrong order?**
 A: Python dictionaries maintain insertion order (Python 3.7+), but the flattening process extracts all values. The order depends on YAML structure traversal.
