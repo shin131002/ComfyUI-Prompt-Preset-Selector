@@ -6,6 +6,8 @@ A flexible ComfyUI node for selecting text presets from external files with adva
 
 ![Prompt Preset Selector Workflow sample](./images/sample_workflow.webp)
 ![Prompt Preset Selector with Wildcard Workflow sample](./images/sample_workflow_wc.webp)
+![Prompt Preset Selector (Multi-File, Wildcard)](./images/multi-file.webp)
+![Prompt Preset Selector (Folder, Wildcard)](./images/folder.webp)
 
 ## Features
 
@@ -18,12 +20,14 @@ A flexible ComfyUI node for selecting text presets from external files with adva
 - 🔄 **ComfyUI-Impact-Pack Integration**: Compatible with wildcards folder
 - 📝 **Easy Editing**: Edit presets with any text editor - no need to touch Python code
 - 🗂️ **Multiple Preset Files**: Organize presets by category
+- 🔀 **Multi-File Search**: Search across up to 3 files at once, each with its own on/off toggle
+- 📂 **Folder Search**: Recursively search every preset file under a folder, with exclude patterns
 - 💬 **Comment Support**: Add comments and empty lines in preset files for organization
 - 🔄 **Dynamic Loading**: No ComfyUI restart needed when editing preset files
 
 ## Node Types
 
-This extension provides two versions of the node:
+This extension provides four nodes:
 
 ### Prompt Preset Selector
 Basic preset selection functionality. Use when wildcard expansion is not needed.
@@ -34,6 +38,12 @@ Enhanced version with wildcard expansion support:
 - `__filename__` - Load a line from a file in the wildcards folder
 - `{__key__|__key__}` - Select content from YAML keys (Impact Pack format)
 
+### Prompt Preset Selector (Multi-File, Wildcard)
+Searches up to 3 preset files at the same time, so you don't have to merge files with different formats by hand. Each file slot has its own on/off toggle, dropdown, and absolute path field. Full wildcard support.
+
+### Prompt Preset Selector (Folder, Wildcard)
+Recursively searches every `.txt` / `.yaml` / `.yml` file under a given folder, with optional exclude patterns. Full wildcard support.
+
 ## Installation
 
 1. Navigate to your ComfyUI custom nodes directory:
@@ -43,7 +53,7 @@ cd ComfyUI/custom_nodes
 
 2. Clone this repository:
 ```bash
-git clone https://github.com/YOUR_USERNAME/ComfyUI-Prompt-Preset-Selector.git
+git clone https://github.com/shin131002/ComfyUI-Prompt-Preset-Selector.git
 ```
 
 3. (Optional) Install PyYAML if not already installed (for YAML support):
@@ -88,6 +98,145 @@ C:\Users\YourName\Documents\presets\lighting.yml  (Windows)
 ```
 
 Supported file types: `.txt`, `.yaml`, `.yml`
+
+### Multi-File and Folder Search
+
+When presets are spread across several files with different formats, merging them into one file by hand is tedious. The Multi-File and Folder nodes search across multiple files at once instead.
+
+Both nodes prefix every line with the file it came from, so the normal keyword search can narrow results down to a single file.
+
+#### Prompt Preset Selector (Multi-File, Wildcard)
+
+Three independent file slots. Each slot has:
+
+| Field | Description |
+|-------|-------------|
+| `enabled{n}` | Turn the slot on/off without clearing its settings |
+| `preset_file{n}` | Dropdown, same as the basic node |
+| `absolute_path{n}` | Absolute path (takes priority over that slot's dropdown) |
+
+Lines are prefixed with the file name:
+
+```
+colors.txt: red
+colors.txt: blue
+camera_angles.yaml: camera_angles:close_up: front view, low-angle shot
+```
+
+Narrow to one file by searching its prefix:
+
+```
+Keyword: colors.txt:
+```
+
+Presets are numbered in slot order (slot 1, then 2, then 3), and within each file in its original order. Disabling a slot removes its lines from the list entirely, which shifts the indices of later slots.
+
+#### Prompt Preset Selector (Folder, Wildcard)
+
+Loads every `.txt` / `.yaml` / `.yml` file under `folder_path`, including subfolders.
+
+| Field | Description |
+|-------|-------------|
+| `folder_path` | Absolute path to the folder to search |
+| `exclude_pattern` | Optional glob patterns, comma-separated |
+
+Lines are prefixed with the path relative to `folder_path`, so identically named files in different subfolders don't collide:
+
+```
+colors.txt: red
+sub/colors.txt: crimson
+```
+
+Files are loaded in alphabetical order of their relative path, so `preset_index` stays stable between runs.
+
+##### exclude_pattern Syntax
+
+**Basic rules**
+
+- Separate multiple patterns with a **comma or a newline**. Surrounding whitespace is trimmed.
+- Each pattern is matched using Python's `fnmatch`.
+- Every pattern is tested against **both** the path relative to `folder_path` **and** the bare file name. A match on either one excludes the file.
+- Matching is a **full match, not a substring match**. `backup` on its own matches nothing — write `*backup*`.
+- Leaving the field empty excludes nothing.
+
+**Supported wildcards**
+
+| Symbol | Meaning |
+|--------|---------|
+| `*` | Zero or more characters (**including `/`**) |
+| `?` | Exactly one character |
+| `[abc]` | Any one character inside the brackets |
+| `[!abc]` | Any one character *not* inside the brackets |
+
+**Examples**
+
+Given this folder:
+
+```
+a.txt
+b_backup.txt
+notes.yaml
+tmp_draft.txt
+sub/a.txt
+sub/deep/c.txt
+Backup/old.txt
+```
+
+| Pattern | Files excluded |
+|---------|----------------|
+| `sub/*` | `sub/a.txt`, `sub/deep/c.txt` (the whole subtree) |
+| `sub` | Nothing — a bare folder name never matches |
+| `*_backup*` | `b_backup.txt` |
+| `tmp_*, *_backup*` | `tmp_draft.txt`, `b_backup.txt` |
+| `*.yaml` | `notes.yaml` |
+| `sub/a.txt` | `sub/a.txt` only |
+| `*/deep/*` | `sub/deep/c.txt` |
+| `?.txt` | `a.txt`, `sub/a.txt`, `sub/deep/c.txt` |
+
+**⚠️ Three things to watch for**
+
+**1. `*` crosses `/`.**
+`*.txt` excludes `sub/deep/c.txt` as well as the top-level files — unlike a normal shell glob, where `*` stops at a directory separator. There is currently no way to exclude only the `.txt` files sitting directly inside `folder_path`.
+
+**2. File names are matched too, so same-named files are caught together.**
+`a.txt` also excludes `sub/a.txt`. Excluding *only* the top-level `a.txt` is not possible, because its relative path and its file name are the same string. To target just the one in the subfolder, write the full relative path: `sub/a.txt`.
+
+**3. Case sensitivity follows the operating system.**
+`fnmatch` respects platform conventions, so `backup/*` does **not** match `Backup/old.txt` on Linux/macOS, but **does** on Windows. Worth remembering if you share a workflow across a dual-boot setup.
+
+**Common patterns**
+
+```
+*_backup*, *_bak*   → Backup files
+tmp_*, *_wip*       → Drafts and work in progress
+_archive/*          → An entire archive folder
+*.yml               → A single extension, at every level
+```
+
+#### Cross-File YAML Key References
+
+In both nodes, `{__key__|__key__}` searches keys across **all** loaded files, so keys defined in separate YAML files can reference each other:
+
+```yaml
+# heroes.yaml
+heroes:
+  - superman, red cape, blue suit
+
+# sidekicks.yaml
+sidekicks:
+  - robin, red vest, yellow cape
+
+# characters.yaml
+characters:
+  all:
+    - {__heroes__|__sidekicks__}
+```
+
+Selecting `all` picks from either file. If the same top-level key exists in more than one file, the file loaded later wins.
+
+#### When Nothing is Selected
+
+If no source is active (all slots disabled, folder empty or missing, or no preset matches the keyword), the node outputs an empty string and the workflow continues normally. It does not raise an error or halt the queue. The reason is shown in `selected_info`.
 
 ### Wildcard Features (Wildcard Node Only)
 
@@ -405,6 +554,33 @@ All parameters from the basic version, plus:
 |-----------|------|-------------|
 | `enable_wildcard` | Boolean | Enable/disable wildcard expansion (default: true) |
 
+### Prompt Preset Selector (Multi-File, Wildcard)
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `enabled1` / `enabled2` / `enabled3` | Boolean | Turn each file slot on/off (default: true) |
+| `preset_file1` / `preset_file2` / `preset_file3` | Dropdown | Select a file for each slot |
+| `absolute_path1` / `absolute_path2` / `absolute_path3` | String | Optional: absolute path for each slot (overrides that slot's dropdown) |
+| `keyword` | String | Keywords for filtering (applied to the combined list) |
+| `keyword_mode` | Dropdown | Filter mode: OFF, AND, OR |
+| `selection_mode` | Dropdown | Manual, Sequential, Sequential (continue), Random |
+| `preset_index` | Integer | Starting index (0-based) in the combined list |
+| `seed` | Integer | Random seed for reproducible random selection |
+| `enable_wildcard` | Boolean | Enable/disable wildcard expansion (default: true) |
+
+### Prompt Preset Selector (Folder, Wildcard)
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `folder_path` | String | Absolute path to the folder to search (subfolders included) |
+| `exclude_pattern` | String | Optional: comma-separated glob patterns to skip (e.g. `*_backup*, tmp_*`) |
+| `keyword` | String | Keywords for filtering (applied to the combined list) |
+| `keyword_mode` | Dropdown | Filter mode: OFF, AND, OR |
+| `selection_mode` | Dropdown | Manual, Sequential, Sequential (continue), Random |
+| `preset_index` | Integer | Starting index (0-based) in the combined list |
+| `seed` | Integer | Random seed for reproducible random selection |
+| `enable_wildcard` | Boolean | Enable/disable wildcard expansion (default: true) |
+
 ## Node Outputs
 
 | Output | Type | Description |
@@ -579,8 +755,14 @@ For random selection:
 ### Wildcard Tips
 - Keep `enable_wildcard=true` recommended (no effect if no wildcard syntax exists)
 - Sequential mode expands wildcards sequentially too
-- `{__key__|__key__}` references keys within the same YAML file
+- `{__key__|__key__}` references keys within the same YAML file (in the Multi-File and Folder nodes, it searches across all loaded files)
 - `__filename__` searches both presets and wildcards folders
+
+### Multi-File and Folder Tips
+- Use the `enabled{n}` toggles to A/B test file combinations without retyping paths
+- Search a prefix (`colors.txt:`, `sub/`) to scope results to one file or subfolder
+- Keep `exclude_pattern` in mind when a folder holds backups, drafts, or notes you don't want in the pool
+- Because indices are assigned after filtering, changing which files are active shifts `preset_index` results — use keyword scoping if you need stable indices
 
 ## Troubleshooting
 
@@ -615,6 +797,18 @@ A:
 
 **Q: Wildcard choice lines included in filter results?**
 A: Include the colon `:` in your keyword search. For example, searching for `heroes` will also match `{__heroes__|...}`, but searching for `heroes:` will only match actual key hierarchies and exclude wildcard choice lines.
+
+**Q: Nothing generated / empty prompt from the Multi-File or Folder node?**
+A: Check `selected_info`. These nodes intentionally output an empty string (rather than erroring) when no source is active, so the workflow keeps running. Common causes: all `enabled{n}` toggles are off, `folder_path` doesn't exist, `exclude_pattern` matched everything, or the keyword filtered out all presets.
+
+**Q: Folder node not finding files in subfolders?**
+A: Subfolders are searched recursively by default. Verify the files use a supported extension (`.txt`, `.yaml`, `.yml`) and that `exclude_pattern` isn't matching them — patterns are tested against both the relative path and the file name.
+
+**Q: preset_index points to a different preset than before?**
+A: Indices are assigned to the combined, filtered list. Enabling/disabling a slot, adding a file to the folder, or changing the keyword all shift the numbering. Scope with a keyword prefix (e.g. `colors.txt:`) for more stable results.
+
+**Q: Two files have the same name in the Folder node?**
+A: Prefixes use the path relative to `folder_path`, so `colors.txt` and `sub/colors.txt` stay distinct. In the Multi-File node prefixes are file names only, so same-named files in different folders will share a prefix.
 
 **Q: YAML nested dict returns wrong order?**
 A: Python dictionaries maintain insertion order (Python 3.7+), but the flattening process extracts all values. The order depends on YAML structure traversal.

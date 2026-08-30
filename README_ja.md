@@ -6,6 +6,8 @@
 
 ![Prompt Preset Selectorワークフロー例](./images/sample_workflow.webp)
 ![Prompt Preset Selector with Wildcardワークフロー例](./images/sample_workflow_wc.webp)
+![Prompt Preset Selector (Multi-File, Wildcard)](./images/multi-file.webp)
+![Prompt Preset Selector (Folder, Wildcard)](./images/folder.webp)
 
 ## 機能
 
@@ -18,12 +20,14 @@
 - 🔄 **ComfyUI-Impact-Pack連携**: wildcardsフォルダとの互換性
 - 📝 **簡単な編集**: 任意のテキストエディタでプリセットを編集可能（Pythonコードの変更不要）
 - 🗂️ **複数のプリセットファイル**: カテゴリ別にプリセットを整理
+- 🔀 **複数ファイル横断検索**: 最大3ファイルを同時に検索、各スロットに個別のON/OFFトグル付き
+- 📂 **フォルダ検索**: フォルダ配下のプリセットファイルを再帰的に検索、除外パターン指定可
 - 💬 **コメント対応**: プリセットファイルにコメントや空行を追加可能
 - 🔄 **動的読み込み**: プリセットファイル編集時にComfyUIの再起動不要
 
 ## ノード種類
 
-このノードには2つのバージョンがあります：
+このノードには4つのバージョンがあります：
 
 ### Prompt Preset Selector
 基本的なプリセット選択機能を提供。Wildcard展開は不要な場合に使用。
@@ -34,6 +38,12 @@ Wildcard展開機能付きバージョン。以下の構文に対応：
 - `__filename__` - wildcardsフォルダ内のファイルから1行を読み込み
 - `{__key__|__key__}` - YAMLファイル内のキーから内容を選択（Impact Pack形式）
 
+### Prompt Preset Selector (Multi-File, Wildcard)
+最大3つのプリセットファイルを同時に検索。書式の異なる複数ファイルを手動で1つに統合する必要がありません。各ファイルスロットに個別のON/OFFトグル、ドロップダウン、絶対パス欄を装備。Wildcard構文にフル対応。
+
+### Prompt Preset Selector (Folder, Wildcard)
+指定フォルダ配下の`.txt` / `.yaml` / `.yml`ファイルをサブフォルダも含めて再帰的に検索。除外パターンの指定も可能。Wildcard構文にフル対応。
+
 ## インストール
 
 1. ComfyUIのカスタムノードディレクトリに移動：
@@ -43,7 +53,7 @@ cd ComfyUI/custom_nodes
 
 2. このリポジトリをクローン：
 ```bash
-git clone https://github.com/YOUR_USERNAME/ComfyUI-Prompt-Preset-Selector.git
+git clone https://github.com/shin131002/ComfyUI-Prompt-Preset-Selector.git
 ```
 
 3. （オプション）PyYAMLをインストール（YAML対応用、未インストールの場合）：
@@ -88,6 +98,145 @@ C:\Users\YourName\Documents\presets\lighting.yml  (Windows)
 ```
 
 対応ファイル形式：`.txt`、`.yaml`、`.yml`
+
+### 複数ファイル・フォルダ検索
+
+プリセットが書式の異なる複数ファイルに分散していると、手動で1ファイルに統合するのは手間がかかります。Multi-File版とFolder版はファイルを統合せず、複数ファイルを横断して検索します。
+
+どちらのノードも各行に「出所ファイル」のプレフィックスを自動付与するため、通常のキーワード検索でファイル単位に絞り込めます。
+
+#### Prompt Preset Selector (Multi-File, Wildcard)
+
+独立した3つのファイルスロットを持ちます。各スロットの構成：
+
+| 項目 | 説明 |
+|------|------|
+| `enabled{n}` | 設定を消さずにスロットをON/OFF |
+| `preset_file{n}` | ドロップダウン（基本版と同じ） |
+| `absolute_path{n}` | 絶対パス（そのスロットのドロップダウンより優先） |
+
+各行にはファイル名がプレフィックスとして付きます：
+
+```
+colors.txt: red
+colors.txt: blue
+camera_angles.yaml: camera_angles:close_up: front view, low-angle shot
+```
+
+プレフィックスで検索すればファイル単位に絞り込めます：
+
+```
+Keyword: colors.txt:
+```
+
+インデックスはスロット順（1→2→3）、各ファイル内は元の順序で採番されます。スロットをOFFにするとその行はリストごと消えるため、後続スロットのインデックスがずれます。
+
+#### Prompt Preset Selector (Folder, Wildcard)
+
+`folder_path`配下の`.txt` / `.yaml` / `.yml`ファイルを、サブフォルダも含めてすべて読み込みます。
+
+| 項目 | 説明 |
+|------|------|
+| `folder_path` | 検索対象フォルダの絶対パス |
+| `exclude_pattern` | 除外するglobパターン（カンマ区切り、省略可） |
+
+各行には`folder_path`からの相対パスがプレフィックスとして付くため、別のサブフォルダにある同名ファイルも衝突しません：
+
+```
+colors.txt: red
+sub/colors.txt: crimson
+```
+
+ファイルは相対パスのアルファベット順に読み込まれるため、実行間で`preset_index`が安定します。
+
+##### exclude_patternの書き方
+
+**基本ルール**
+
+- 複数指定する場合の区切りは**カンマまたは改行**。前後の空白は自動で除去されます
+- 各パターンはPython標準の`fnmatch`で照合されます
+- 各パターンは「`folder_path`からの**相対パス**」と「**ファイル名**」の両方に対して照合され、どちらか一方でも一致すれば除外されます
+- **部分一致ではなく完全一致**です。`backup`だけでは何にも一致しません（`*backup*`と書く必要があります）
+- 空欄の場合は何も除外されません
+
+**使えるワイルドカード**
+
+| 記号 | 意味 |
+|------|------|
+| `*` | 0文字以上の任意の文字（**`/`も含む**） |
+| `?` | 任意の1文字 |
+| `[abc]` | 括弧内のいずれか1文字 |
+| `[!abc]` | 括弧内**以外**の1文字 |
+
+**具体例**
+
+以下のフォルダ構成の場合：
+
+```
+a.txt
+b_backup.txt
+notes.yaml
+tmp_draft.txt
+sub/a.txt
+sub/deep/c.txt
+Backup/old.txt
+```
+
+| パターン | 除外されるファイル |
+|----------|--------------------|
+| `sub/*` | `sub/a.txt`、`sub/deep/c.txt`（サブ配下ごと） |
+| `sub` | 何も除外されない（フォルダ名だけでは一致しない） |
+| `*_backup*` | `b_backup.txt` |
+| `tmp_*, *_backup*` | `tmp_draft.txt`、`b_backup.txt` |
+| `*.yaml` | `notes.yaml` |
+| `sub/a.txt` | `sub/a.txt`のみ |
+| `*/deep/*` | `sub/deep/c.txt` |
+| `?.txt` | `a.txt`、`sub/a.txt`、`sub/deep/c.txt` |
+
+**⚠️ 注意点3つ**
+
+**1. `*`は`/`を跨ぎます**
+`*.txt`と書くと直下のファイルだけでなく`sub/deep/c.txt`まで除外されます。`*`がディレクトリ区切りで止まる通常のシェルglobとは異なる挙動です。「`folder_path`直下の`.txt`だけ除外」という指定は現状できません。
+
+**2. ファイル名にも照合されるため、同名ファイルが巻き添えになります**
+`a.txt`と指定すると`sub/a.txt`も一緒に除外されます。また「直下の`a.txt`だけを除外」は原理的に指定できません（相対パスとファイル名が同一の文字列になるため）。サブフォルダ側だけを狙う場合は`sub/a.txt`と相対パスをフルで書けば正確に効きます。
+
+**3. 大文字小文字の区別はOSに依存します**
+`fnmatch`はOSの慣習に従うため、Linux/macOSでは`backup/*`は`Backup/old.txt`に一致**しません**が、Windowsでは一致**します**。デュアルブート環境などで同じワークフローを共有する場合は注意してください。
+
+**よく使うパターン**
+
+```
+*_backup*, *_bak*   → バックアップファイル
+tmp_*, *_wip*       → 下書き・作業中ファイル
+_archive/*          → アーカイブフォルダごと
+*.yml               → 特定拡張子のみ（全階層）
+```
+
+#### ファイル横断のYAMLキー参照
+
+両ノードとも`{__key__|__key__}`は読み込んだ**全ファイル**からキーを検索します。別々のYAMLファイルに定義したキー同士でも相互参照できます：
+
+```yaml
+# heroes.yaml
+heroes:
+  - superman, red cape, blue suit
+
+# sidekicks.yaml
+sidekicks:
+  - robin, red vest, yellow cape
+
+# characters.yaml
+characters:
+  all:
+    - {__heroes__|__sidekicks__}
+```
+
+`all`を選択すると、どちらのファイルからも選ばれます。同じトップレベルキーが複数ファイルに存在する場合は、後から読み込まれたファイルが優先されます。
+
+#### 該当プリセットが無い場合の挙動
+
+有効なソースが無い場合（全スロットがOFF、フォルダが空または存在しない、キーワードに一致するプリセットが無い）、ノードは空文字列を出力し、**ワークフローはそのまま継続**します。エラーを投げてキューを止めることはありません。理由は`selected_info`に表示されます。
 
 ### Wildcard機能（Wildcard版ノードのみ）
 
@@ -405,6 +554,33 @@ presets:
 |-----------|------|-------------|
 | `enable_wildcard` | ブール値 | wildcard展開のON/OFF（デフォルト：true） |
 
+### Prompt Preset Selector (Multi-File, Wildcard)（複数ファイル版）
+
+| パラメータ | 型 | 説明 |
+|-----------|------|-------------|
+| `enabled1` / `enabled2` / `enabled3` | ブール値 | 各ファイルスロットのON/OFF（デフォルト：true） |
+| `preset_file1` / `preset_file2` / `preset_file3` | ドロップダウン | 各スロットのファイル選択 |
+| `absolute_path1` / `absolute_path2` / `absolute_path3` | 文字列 | 各スロットの絶対パス（そのスロットのドロップダウンより優先） |
+| `keyword` | 文字列 | フィルタ用キーワード（結合後のリスト全体に適用） |
+| `keyword_mode` | ドロップダウン | フィルタモード：OFF、AND、OR |
+| `selection_mode` | ドロップダウン | Manual、Sequential、Sequential (continue)、Random |
+| `preset_index` | 整数 | 結合後リストの開始インデックス（0始まり） |
+| `seed` | 整数 | ランダム選択用シード |
+| `enable_wildcard` | ブール値 | wildcard展開のON/OFF（デフォルト：true） |
+
+### Prompt Preset Selector (Folder, Wildcard)（フォルダ版）
+
+| パラメータ | 型 | 説明 |
+|-----------|------|-------------|
+| `folder_path` | 文字列 | 検索対象フォルダの絶対パス（サブフォルダも含む） |
+| `exclude_pattern` | 文字列 | 除外するglobパターン（カンマ区切り、例：`*_backup*, tmp_*`） |
+| `keyword` | 文字列 | フィルタ用キーワード（結合後のリスト全体に適用） |
+| `keyword_mode` | ドロップダウン | フィルタモード：OFF、AND、OR |
+| `selection_mode` | ドロップダウン | Manual、Sequential、Sequential (continue)、Random |
+| `preset_index` | 整数 | 結合後リストの開始インデックス（0始まり） |
+| `seed` | 整数 | ランダム選択用シード |
+| `enable_wildcard` | ブール値 | wildcard展開のON/OFF（デフォルト：true） |
+
 ## ノード出力
 
 | 出力 | 型 | 説明 |
@@ -579,8 +755,14 @@ Filtered: 24/96 presets
 ### Wildcard使用のコツ
 - `enable_wildcard=true`を推奨（wildcard記法がなければ通常通り動作）
 - Sequential modeでwildcardもシーケンシャルに展開
-- `{__key__|__key__}`は同じYAMLファイル内のキーを参照
+- `{__key__|__key__}`は同じYAMLファイル内のキーを参照（Multi-File版・Folder版では読み込んだ全ファイルを横断検索）
 - `__filename__`はpresetsとwildcardsフォルダの両方を検索
+
+### 複数ファイル・フォルダ検索のコツ
+- `enabled{n}`トグルを使えば、パスを入力し直さずにファイル組み合わせのA/Bテストが可能
+- プレフィックス（`colors.txt:`、`sub/`など）で検索すると、特定のファイルやサブフォルダに絞り込める
+- バックアップや下書き、メモをプールに含めたくない場合は`exclude_pattern`を活用
+- インデックスはフィルタ後のリストに対して採番されるため、有効なファイルを変えると`preset_index`の指す先がずれる。安定したインデックスが必要ならキーワードで範囲を固定する
 
 ## トラブルシューティング
 
@@ -615,6 +797,18 @@ A:
 
 **Q: Wildcard選択肢がフィルタに含まれてしまう？**
 A: キーワードにコロン`:`を付けて検索してください。例：`heroes:`ではなく`heroes`で検索すると、`{__heroes__|...}`もマッチしてしまいます。コロンを付けることでキー階層として検索され、wildcard選択肢を除外できます。
+
+**Q: Multi-File版・Folder版でプロンプトが空になる／何も生成されない？**
+A: まず`selected_info`を確認してください。これらのノードは有効なソースが無い場合、エラーを出さずに空文字列を返してワークフローを継続する設計です。よくある原因：`enabled{n}`が全てOFF、`folder_path`が存在しない、`exclude_pattern`が全ファイルに一致した、キーワードで全プリセットが除外された。
+
+**Q: Folder版がサブフォルダ内のファイルを見つけてくれない？**
+A: サブフォルダはデフォルトで再帰検索されます。対応拡張子（`.txt`、`.yaml`、`.yml`）かどうか、`exclude_pattern`に一致していないかを確認してください。パターンは相対パスとファイル名の両方に対して照合されます。
+
+**Q: preset_indexが以前と違うプリセットを指す？**
+A: インデックスは結合・フィルタ後のリストに対して採番されます。スロットのON/OFF、フォルダへのファイル追加、キーワードの変更はいずれも採番をずらします。安定させたい場合はキーワードのプレフィックス（例：`colors.txt:`）で範囲を固定してください。
+
+**Q: Folder版で同名ファイルがある場合は？**
+A: プレフィックスに`folder_path`からの相対パスを使うため、`colors.txt`と`sub/colors.txt`は区別されます。Multi-File版はファイル名のみをプレフィックスにするため、別フォルダの同名ファイルは同じプレフィックスになります。
 
 **Q: YAMLネスト辞書の順序が違う？**
 A: Python辞書は挿入順序を維持（Python 3.7+）しますが、変換処理は構造を走査します。順序はYAML構造の走査に依存します。
