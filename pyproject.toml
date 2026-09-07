@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-prompt-preset-selector"
-description = "Flexible preset selector with YAML support, advanced keyword filtering, hierarchical key search, and multi-file/folder search"
-version = "1.2.0"
+description = "Flexible preset selector with YAML support, advanced keyword filtering, hierarchical key search, multi-file/folder search, and subfolder organization"
+version = "1.3.0"
 license = {file = "LICENSE"}
 
 classifiers = [

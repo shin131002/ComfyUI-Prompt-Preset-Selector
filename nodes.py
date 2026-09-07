@@ -68,28 +68,55 @@ class PromptPresetSelector:
     def IS_CHANGED(cls, preset_file, absolute_path, keyword, keyword_mode, selection_mode, preset_index, seed):
         return f"{preset_file}_{absolute_path}_{keyword}_{keyword_mode}_{selection_mode}_{preset_index}_{seed}"
     
+    @staticmethod
+    def _dropdown_sort_key(rel_path):
+        """
+        Sort key for the preset dropdown.
+
+        Groups top-level files first, then each subfolder's files together,
+        and ignores case so that "Zebra.txt" doesn't jump above "apple.txt".
+        Plain sorted() uses code points, which scatters uppercase, underscore
+        and non-ASCII names and makes long lists hard to scan.
+        """
+        parts = rel_path.split('/')
+        folder = '/'.join(parts[:-1]).lower()
+        return (folder, parts[-1].lower())
+
+    def _scan_preset_dir(self, directory):
+        """
+        Recursively collect .txt/.yaml/.yml files under a directory,
+        returned as paths relative to it (POSIX separators).
+
+        Files directly inside the directory keep their bare file name, so
+        preset_file values saved in existing workflows still resolve.
+        """
+        found = []
+        if not directory or not directory.exists():
+            return found
+        for pattern in ["*.txt", "*.yaml", "*.yml"]:
+            for f in directory.rglob(pattern):
+                try:
+                    found.append(f.relative_to(directory).as_posix())
+                except ValueError:
+                    found.append(f.name)
+        return found
+
     def get_preset_files(self):
         """Get list of .txt, .yaml, .yml files from both presets and wildcards directories"""
         try:
             files = []
             
-            # 1. Get files from presets directory
-            if self.preset_dir.exists():
-                for pattern in ["*.txt", "*.yaml", "*.yml"]:
-                    preset_files = [f.name for f in self.preset_dir.glob(pattern)]
-                    files.extend(preset_files)
+            # 1. Get files from presets directory (including subfolders)
+            files.extend(self._scan_preset_dir(self.preset_dir))
             
             # 2. Get files from Impact Pack wildcards directory (if exists)
             wildcard_dir = self._get_wildcard_dir()
-            if wildcard_dir and wildcard_dir.exists():
-                for pattern in ["*.txt", "*.yaml", "*.yml"]:
-                    wildcard_files = [f.name for f in wildcard_dir.glob(pattern)]
-                    # Add files that don't already exist in presets (avoid duplicates)
-                    for wf in wildcard_files:
-                        if wf not in files:
-                            files.append(wf)
+            for wf in self._scan_preset_dir(wildcard_dir):
+                # Add files that don't already exist in presets (avoid duplicates)
+                if wf not in files:
+                    files.append(wf)
             
-            return sorted(files) if files else []
+            return sorted(files, key=self._dropdown_sort_key) if files else []
         except Exception as e:
             print(f"[Prompt Preset Selector] Error reading preset directories: {e}")
             return []
@@ -867,6 +894,10 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
     Enhanced preset selector with image selection support
     Images are linked to YAML keys using [folder] syntax: "key_name[image_folder]"
     """
+
+    # Set to True to print verbose tracing of image folder lookup and YAML
+    # key traversal to the ComfyUI console. Off by default.
+    DEBUG = False
     
     def __init__(self):
         super().__init__()
@@ -954,8 +985,8 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
         
         sorted_files = sorted(image_files)
         
-        print(f"[DEBUG FILES] Folder: {folder_name}, Total files: {len(sorted_files)}")
-        print(f"[DEBUG FILES] File list: {[f.name for f in sorted_files]}")
+        if self.DEBUG: print(f"[DEBUG FILES] Folder: {folder_name}, Total files: {len(sorted_files)}")
+        if self.DEBUG: print(f"[DEBUG FILES] File list: {[f.name for f in sorted_files]}")
         
         return sorted_files
     
@@ -970,8 +1001,8 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
         # Use modulo to wrap around
         index = image_index % len(image_files)
         
-        print(f"[DEBUG IMAGE SELECT] image_index={image_index}, total_files={len(image_files)}, calculated_index={index}")
-        print(f"[DEBUG IMAGE SELECT] Selected: {image_files[index].name}")
+        if self.DEBUG: print(f"[DEBUG IMAGE SELECT] image_index={image_index}, total_files={len(image_files)}, calculated_index={index}")
+        if self.DEBUG: print(f"[DEBUG IMAGE SELECT] Selected: {image_files[index].name}")
         
         return image_files[index]
     
@@ -1012,9 +1043,9 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
         # First, get regular preset lines
         lines = self.load_preset_lines(preset_file)
         
-        print(f"[DEBUG] Total lines loaded: {len(lines)}")
+        if self.DEBUG: print(f"[DEBUG] Total lines loaded: {len(lines)}")
         if lines:
-            print(f"[DEBUG] First 3 lines: {lines[:3]}")
+            if self.DEBUG: print(f"[DEBUG] First 3 lines: {lines[:3]}")
         
         # Then, extract image folder info from lines
         lines_with_images = []
@@ -1037,7 +1068,7 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
                     # Use the first folder found
                     if folder and not image_folder:
                         image_folder = folder
-                        print(f"[DEBUG] Found image folder '{folder}' in key '{part}'")
+                        if self.DEBUG: print(f"[DEBUG] Found image folder '{folder}' in key '{part}'")
                 
                 # Reconstruct line with clean keys
                 if len(parts) == 2:
@@ -1046,13 +1077,13 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
                     clean_line = f"{':'.join(clean_parts)}: {parts[-1]}"
                 
                 lines_with_images.append((clean_line, image_folder))
-                print(f"[DEBUG] Processed: '{line}' -> clean_line='{clean_line}', folder='{image_folder}'")
+                if self.DEBUG: print(f"[DEBUG] Processed: '{line}' -> clean_line='{clean_line}', folder='{image_folder}'")
             else:
                 lines_with_images.append((line, None))
         
-        print(f"[DEBUG] Lines with image info: {len(lines_with_images)}")
+        if self.DEBUG: print(f"[DEBUG] Lines with image info: {len(lines_with_images)}")
         if lines_with_images:
-            print(f"[DEBUG] First line with image: {lines_with_images[0]}")
+            if self.DEBUG: print(f"[DEBUG] First line with image: {lines_with_images[0]}")
         
         return lines_with_images
     
@@ -1068,77 +1099,77 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
             Image folder name or None
         """
         if not YAML_AVAILABLE:
-            print("[DEBUG YAML] PyYAML not available")
+            if self.DEBUG: print("[DEBUG YAML] PyYAML not available")
             return None
         
-        print(f"[DEBUG YAML] Processing line: '{selected_line}'")
+        if self.DEBUG: print(f"[DEBUG YAML] Processing line: '{selected_line}'")
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 yaml_data = yaml.safe_load(f)
             
-            print(f"[DEBUG YAML] YAML data keys: {list(yaml_data.keys()) if isinstance(yaml_data, dict) else 'not a dict'}")
+            if self.DEBUG: print(f"[DEBUG YAML] YAML data keys: {list(yaml_data.keys()) if isinstance(yaml_data, dict) else 'not a dict'}")
             
             if not isinstance(yaml_data, dict):
-                print("[DEBUG YAML] YAML data is not a dict")
+                if self.DEBUG: print("[DEBUG YAML] YAML data is not a dict")
                 return None
             
             # Extract key path from selected line
             # Format: "key1:key2: content"
             if ':' not in selected_line:
-                print("[DEBUG YAML] No ':' in selected line")
+                if self.DEBUG: print("[DEBUG YAML] No ':' in selected line")
                 return None
             
             parts = selected_line.split(': ')
-            print(f"[DEBUG YAML] Split parts: {parts}")
+            if self.DEBUG: print(f"[DEBUG YAML] Split parts: {parts}")
             
             if len(parts) < 2:
-                print("[DEBUG YAML] Less than 2 parts")
+                if self.DEBUG: print("[DEBUG YAML] Less than 2 parts")
                 return None
             
             # Get the key hierarchy (everything before the last ": ")
             # Join all parts except the last one (which is the content)
             key_parts = parts[:-1]
             key_path = ':'.join(key_parts)
-            print(f"[DEBUG YAML] Key path: '{key_path}'")
+            if self.DEBUG: print(f"[DEBUG YAML] Key path: '{key_path}'")
             
             keys = key_path.split(':')
-            print(f"[DEBUG YAML] Keys to traverse: {keys}")
+            if self.DEBUG: print(f"[DEBUG YAML] Keys to traverse: {keys}")
             
             # Navigate through YAML structure
             current = yaml_data
             for i, key in enumerate(keys):
-                print(f"[DEBUG YAML] Level {i}: Looking for key '{key}' in {list(current.keys()) if isinstance(current, dict) else 'not a dict'}")
+                if self.DEBUG: print(f"[DEBUG YAML] Level {i}: Looking for key '{key}' in {list(current.keys()) if isinstance(current, dict) else 'not a dict'}")
                 
                 if not isinstance(current, dict):
-                    print(f"[DEBUG YAML] Current level is not a dict")
+                    if self.DEBUG: print(f"[DEBUG YAML] Current level is not a dict")
                     return None
                 
                 # Try to find matching key (with or without [folder])
                 matching_key = None
                 for yaml_key in current.keys():
                     clean_key, folder = self.parse_image_folder_from_key(str(yaml_key))
-                    print(f"[DEBUG YAML]   Checking yaml_key='{yaml_key}' -> clean_key='{clean_key}', folder='{folder}'")
+                    if self.DEBUG: print(f"[DEBUG YAML]   Checking yaml_key='{yaml_key}' -> clean_key='{clean_key}', folder='{folder}'")
                     if clean_key == key:
                         matching_key = yaml_key
-                        print(f"[DEBUG YAML]   MATCH! Using key '{yaml_key}'")
+                        if self.DEBUG: print(f"[DEBUG YAML]   MATCH! Using key '{yaml_key}'")
                         break
                 
                 if matching_key is None:
-                    print(f"[DEBUG YAML] No matching key found for '{key}'")
+                    if self.DEBUG: print(f"[DEBUG YAML] No matching key found for '{key}'")
                     return None
                 
                 # Check if this key has [folder] syntax
                 _, image_folder = self.parse_image_folder_from_key(str(matching_key))
                 if image_folder:
-                    print(f"[DEBUG YAML] Found image folder: '{image_folder}'")
+                    if self.DEBUG: print(f"[DEBUG YAML] Found image folder: '{image_folder}'")
                     return image_folder
                 
                 # Move to next level
                 current = current[matching_key]
-                print(f"[DEBUG YAML] Moving to next level, type: {type(current)}")
+                if self.DEBUG: print(f"[DEBUG YAML] Moving to next level, type: {type(current)}")
             
-            print("[DEBUG YAML] Traversed all keys, no folder found")
+            if self.DEBUG: print("[DEBUG YAML] Traversed all keys, no folder found")
             return None
             
         except Exception as e:
@@ -1234,12 +1265,12 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
         else:
             cleaned_line = selected_raw_line
         
-        print(f"[DEBUG] Original raw line: '{selected_raw_line}'")
-        print(f"[DEBUG] Cleaned line for YAML search: '{cleaned_line}'")
+        if self.DEBUG: print(f"[DEBUG] Original raw line: '{selected_raw_line}'")
+        if self.DEBUG: print(f"[DEBUG] Cleaned line for YAML search: '{cleaned_line}'")
         
         selected_image_folder = self.get_image_folder_from_yaml_keys(file_to_load_full, cleaned_line)
         
-        print(f"[DEBUG] Image folder from YAML keys: {selected_image_folder}")
+        if self.DEBUG: print(f"[DEBUG] Image folder from YAML keys: {selected_image_folder}")
         
         # Now get the expanded text from parent class
         text, preset_list, info = self.select_preset_with_wildcard(
@@ -1247,7 +1278,7 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
             selection_mode, preset_index, seed, enable_wildcard
         )
         
-        print(f"[DEBUG] Selected image folder: {selected_image_folder}")
+        if self.DEBUG: print(f"[DEBUG] Selected image folder: {selected_image_folder}")
         
         # Select image
         if selected_image_folder:

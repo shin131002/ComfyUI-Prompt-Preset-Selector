@@ -9,6 +9,26 @@ A flexible ComfyUI node for selecting text presets from external files with adva
 ![Prompt Preset Selector (Multi-File, Wildcard)](./images/multi-file.webp)
 ![Prompt Preset Selector (Folder, Wildcard)](./images/folder.webp)
 
+## 🆕 New in v1.3.0 — Subfolder Support
+
+**The preset dropdown now reads subfolders.** Until v1.2.0 only files sitting directly inside the `presets` and `wildcards` folders appeared in the list. You can now organise presets into folders and pick them from the same dropdown:
+
+```
+presets/
+├── camera_angles.txt          → "camera_angles.txt"
+├── portrait/
+│   ├── lighting.txt           → "portrait/lighting.txt"
+│   └── expressions.yaml       → "portrait/expressions.yaml"
+└── landscape/
+    └── weather.txt            → "landscape/weather.txt"
+```
+
+The dropdown is also **sorted case-insensitively** now, with top-level files first and each subfolder grouped together. Previously the list was ordered by character code, which scattered uppercase, underscore and non-ASCII names in places that made them easy to miss.
+
+**Existing workflows are unaffected.** Files directly inside `presets` are still listed and saved under their bare file name, exactly as before. Subfolders are opt-in — nothing changes until you create one.
+
+If your `presets` or `wildcards` folder already contained subfolders, those files will now appear in the dropdown for the first time, so the list may be longer than you remember.
+
 ## Features
 
 - 📁 **External File Management**: Store presets in `.txt`, `.yaml`, or `.yml` files
@@ -20,6 +40,7 @@ A flexible ComfyUI node for selecting text presets from external files with adva
 - 🔄 **ComfyUI-Impact-Pack Integration**: Compatible with wildcards folder
 - 📝 **Easy Editing**: Edit presets with any text editor - no need to touch Python code
 - 🗂️ **Multiple Preset Files**: Organize presets by category
+- 🗃️ **Subfolder Support**: Group presets into folders and select them from the dropdown
 - 🔀 **Multi-File Search**: Search across up to 3 files at once, each with its own on/off toggle
 - 📂 **Folder Search**: Recursively search every preset file under a folder, with exclude patterns
 - 💬 **Comment Support**: Add comments and empty lines in preset files for organization
@@ -86,6 +107,25 @@ Preset files are loaded from the following locations (in priority order):
 3. **wildcards folder** - `ComfyUI/custom_nodes/ComfyUI-Impact-Pack/wildcards/` (when Impact Pack is installed)
 
 The dropdown displays files from both the presets and wildcards folders (duplicates are excluded).
+
+#### Subfolders
+
+Both folders are scanned recursively. Files inside a subfolder appear in the dropdown as a path relative to that folder:
+
+```
+presets/portrait/lighting.txt   → shown as "portrait/lighting.txt"
+presets/camera_angles.txt       → shown as "camera_angles.txt"
+```
+
+Entries are listed with top-level files first, then each subfolder's files grouped together, sorted without regard to case.
+
+To reference a file inside a subfolder with `__filename__` wildcard syntax, include the folder in the name:
+
+```
+__portrait/lighting__
+```
+
+Adding a file does not require restarting ComfyUI — use **Refresh Node Definitions** (or press `R`) and the dropdown will be rebuilt.
 
 ### Using Absolute Paths
 
@@ -797,6 +837,9 @@ A:
 
 **Q: Wildcard choice lines included in filter results?**
 A: Include the colon `:` in your keyword search. For example, searching for `heroes` will also match `{__heroes__|...}`, but searching for `heroes:` will only match actual key hierarchies and exclude wildcard choice lines.
+
+**Q: A newly added preset file isn't in the dropdown?**
+A: The list is rebuilt whenever ComfyUI fetches node definitions, so a restart isn't needed — use **Refresh Node Definitions** (or press `R`). If it still doesn't appear, check that the extension is `.txt`, `.yaml` or `.yml`, and remember the list is sorted with top-level files first and subfolders grouped after them, so a file in a subfolder won't sit next to the others.
 
 **Q: Nothing generated / empty prompt from the Multi-File or Folder node?**
 A: Check `selected_info`. These nodes intentionally output an empty string (rather than erroring) when no source is active, so the workflow keeps running. Common causes: all `enabled{n}` toggles are off, `folder_path` doesn't exist, `exclude_pattern` matched everything, or the keyword filtered out all presets.
