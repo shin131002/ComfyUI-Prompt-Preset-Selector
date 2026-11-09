@@ -9,7 +9,43 @@
 ![Prompt Preset Selector (Multi-File, Wildcard)](./images/multi-file.webp)
 ![Prompt Preset Selector (Folder, Wildcard)](./images/folder.webp)
 
-## 🆕 v1.3.0の新機能 — サブフォルダ対応
+## 🆕 v1.4.0の新機能
+
+### keyword出力
+
+全ノードに**`keyword`出力**を追加しました。選ばれたプリセットが実際にマッチしたキーワードを`_`で連結して出力します。ANDモードは全キーワード（`front close-up` → `front_close-up`）、ORモードはマッチしたもの（`front back` → `front`または`back`）、OFFモードは空です。詳しくは[keyword出力](#keyword出力v140)を参照してください。
+
+`keyword`は出力の末尾に追加したので、**既存のワークフローの接続はそのまま使えます**。選ばれるプリセットも以前と同じです。
+
+### 追加テキストと強度
+
+全ノードの下部に3つのウィジェットを追加しました。ON/OFFスイッチ、プリセットの後ろに付け足す**追加テキスト**欄、出力全体を`(text:strength)`形式で囲む**強度**です。詳しくは[追加テキストと強度](#追加テキストと強度v140)を参照してください。
+
+```
+プリセット:        masterpiece, 1girl
+additional_text:  smile (ON)
+strength:         1.5
+text出力:          (masterpiece, 1girl, smile:1.5)
+```
+
+追加テキスト欄でもワイルドカード（`__filename__`、`{A|B}`、`{__key__|__key__}`）が使えます。
+
+デフォルト（OFF／空／1.0）では出力は変わらないので、既存のワークフローはそのまま動作します。
+
+### ワイルドカードの修正
+
+`__filename__`がエラーも出さずに展開されなかった次のケースを修正しました：
+
+- **サブフォルダ**：`__portrait/lighting__`（v1.3.0のREADMEには記載していましたが、実際には展開されていませんでした）。区切りは`\`でも可
+- **日本語などの名前**：`__髪型__`のような非ASCIIのファイル名
+- **Impact Packのフォルダ名**：Impact Packが`comfyui-impact-pack`（小文字。Registry／Manager経由でこの名前になることがあります）でインストールされていても、wildcardsフォルダを見つけられるようになりました。これまではLinux / macOSで見つかりませんでした
+- **BOM付きUTF-8**：1行目の`# コメント`が無視されるようになりました（プリセットファイル・ワイルドカードファイルとも）
+- **行頭に空白があるコメント**：ワイルドカードファイルの`  # コメント`を、プリセットファイルと同じくコメントとして扱います
+- **連続したワイルドカード**：`__a____b__`を2つのワイルドカードとして読みます
+
+`presets`／`wildcards`の外を指す`__../xxx__`のような名前は拒否します。通常のワイルドカードの展開結果は以前と同じです。
+
+## v1.3.0の新機能 — サブフォルダ対応
 
 **プリセットのドロップダウンがサブフォルダを読むようになりました。** v1.2.0までは`presets`フォルダと`wildcards`フォルダの直下にあるファイルしかリストに出ませんでした。今後はフォルダで分類して整理し、同じドロップダウンから選択できます：
 
@@ -35,8 +71,10 @@ presets/
 - 🌐 **絶対パス対応**: システム上のどこにあるファイルでも使用可能
 - 📝 **複数のYAML形式対応**: リスト、ネスト辞書、フラット形式に対応
 - 🔍 **高度なキーワードフィルタリング**: キーワードの包含・除外、フレーズ検索に対応
+- 🏷️ **keyword出力**: 選ばれたプリセットがマッチしたキーワードを、ファイル名などにそのまま使える形で出力
 - 🎲 **複数の選択モード**: Manual、Sequential、Sequential (continue)、Random
 - 🎰 **Wildcard展開機能**: `{A|B|C}`、`__filename__`、`{__key__|__key__}`構文に対応
+- ➕ **追加テキストと強度**: プリセットファイルを編集せずに、テキストの付け足しと出力全体への強度指定が可能
 - 🔄 **ComfyUI-Impact-Pack連携**: wildcardsフォルダとの互換性
 - 📝 **簡単な編集**: 任意のテキストエディタでプリセットを編集可能（Pythonコードの変更不要）
 - 🗂️ **複数のプリセットファイル**: カテゴリ別にプリセットを整理
@@ -311,6 +349,14 @@ __colors__ dress
 1. `presets/colors.txt`
 2. `wildcards/colors.txt`（presetsになければ）
 
+名前のルール：
+- `.txt`を付けずに書きます。対象は`.txt`ファイルのみです（`.yaml`は対象外）
+- サブフォルダ内のファイルはフォルダ名を含めて書きます：`__portrait/lighting__`（`\`区切りも可）
+- 使える文字は英数字・`_`・`-`・`.`と、日本語などの非ASCII文字です。スペースやその他の記号は使えません
+- Linux / macOSでは大文字小文字を区別します
+- `..`やドライブ指定は使えません。参照できるのは`presets`と`wildcards`の中だけです
+- ファイルはUTF-8で保存してください（BOMの有無は問いません）。行頭が`#`の行はコメントです（前に空白があっても可）
+
 ##### 3. YAMLキー選択: `{__key1__|__key2__}`
 YAMLファイル内のキーから内容を選択（Impact Pack形式）：
 
@@ -512,6 +558,70 @@ camera_angles: -wide_shot:  → キーフィルタ + キー除外
 | `lighting: -dramatic:` | AND | lightingキーのプリセット、dramaticキーを除外 |
 | `heroes:` | AND | heroesキーのみ（wildcard選択肢`{__heroes__|...}`を除外） |
 
+#### keyword出力（v1.4.0）
+
+選ばれたプリセットが実際にマッチしたキーワードを、`_`で連結したテキストで出力します（全ノード共通、出力の末尾）。
+
+| キーワード | モード | 選ばれた行 | `keyword`出力 |
+|---------|------|--------|--------|
+| `front close-up` | AND | `front view, close-up` | `front_close-up` |
+| `front back` | OR | `front view, close-up` | `front` |
+| `front back` | OR | `back view, wide shot` | `back` |
+| `"front view" close-up` | AND | `front view, close-up` | `front_view_close-up` |
+| `front -wide` | AND | `front view, close-up` | `front` |
+| `camera_angles:close_up:` | AND | `camera_angles:close_up: front view` | `camera_angles_close_up` |
+| `front` | OFF | （どれでも） | （空） |
+
+- フレーズ内のスペースも`_`になります
+- 除外キーワード（`-wide`など）は出力に含みません
+- YAMLキー検索の`:`は`_`に置き換え、末尾の`:`は外します（ファイル名に使えるように）
+- ORモードで、選ばれた行が複数のキーワードを含む場合は、すべて入力順に連結します（例：`front_back`）
+- 大文字小文字は入力どおりに出力します（マッチの判定自体は区別しません）
+- Multi-File版・Folder版では、行の先頭に付くファイル名（`angles.txt: `など）もマッチの対象です
+- `keyword_mode`がOFFのとき、包含キーワードが無いとき、該当するプリセットが無いときは空文字です
+
+### 追加テキストと強度（v1.4.0）
+
+全ノードの下部にある3つのウィジェットです：
+
+| パラメータ | 型 | 説明 |
+|-----------|------|-------------|
+| `enable_additional_text` | ブール値 | `additional_text`のON/OFF（デフォルト：OFF） |
+| `additional_text` | 文字列（複数行） | ON時、`プリセット, 追加テキスト`の形でプリセットの後ろに追加 |
+| `strength` | 小数 | 出力全体を`(text:strength)`形式で囲む。デフォルト1.0で変更なし（範囲0〜10） |
+
+処理順：プリセット選択 → ワイルドカード展開 → 追加テキスト（追加テキスト内のワイルドカードも展開） → 強度
+
+**additional_textのルール**
+- 行頭が`#`の行はコメントとして無視します（前に空白があっても可）。行の途中の`#`はそのまま出力します
+- 空行は無視し、残りの行は`, `で連結します
+- プリセットや各行の末尾のカンマは除去してから連結するので、`,,`にはなりません
+- すべての行がコメントの場合は、何も追加しません
+- スイッチをOFFにしても欄の内容は残るので、実行ごとに切り替えられます
+
+**additional_text内のワイルドカード**
+- `__filename__`、`{A|B|C}`、`{__key__|__key__}`を、プリセットと同じルールで展開します。`enable_wildcard`と`selection_mode`に従います
+- ランダム選択には`seed`から派生したシードを使います。同じseedなら同じ結果になりますが、プリセット側のワイルドカードとは独立に選ばれます（両方にある`{red|blue}`が必ず同じ側になる、ということはありません）
+- Sequentialモードでは、追加テキスト側のワイルドカードも実行ごとに順番に切り替わります
+- `{__key__|__key__}`は、選択中のYAMLプリセットファイルのキーを参照します（Multi-File版・Folder版では読み込んだ全ファイル）
+- コメント行は展開の前に除去するので、コメントアウトしたワイルドカードは何の影響もありません
+- 基本版の"Prompt Preset Selector"は、プリセットと同じく追加テキストのワイルドカードも展開しません
+
+```
+# メモ：季節ごとの追加
+smile,
+  # blue sky   ← 無視される
+cherry blossoms
+```
+→ `masterpiece, 1girl, smile, cherry blossoms`
+
+**strengthのルール**
+- 1.0のときは出力を変えません
+- ComfyUIのプロンプト構文ではネストした強度は掛け算になるため、プリセット内の強度にも掛かります：`(red:1.2), dress`にstrength 1.5 → redは1.8、dressは1.5
+- 出力が空のときは適用しません
+
+適用したときは、`selected_info`に`[Additional text appended]`／`[Wildcards expanded in additional text]`／`[Strength: 1.5]`と表示します。`keyword`出力には影響しません。
+
 ### カスタムプリセットの作成
 
 #### テキストファイル (.txt)
@@ -621,13 +731,24 @@ presets:
 | `seed` | 整数 | ランダム選択用シード |
 | `enable_wildcard` | ブール値 | wildcard展開のON/OFF（デフォルト：true） |
 
+### 全ノード共通パラメータ（v1.4.0）
+
+| パラメータ | 型 | 説明 |
+|-----------|------|-------------|
+| `enable_additional_text` | ブール値 | `additional_text`のON/OFF（デフォルト：OFF） |
+| `additional_text` | 文字列 | ON時、出力に追加するテキスト。行頭`#`はコメント。ワイルドカードも展開 |
+| `strength` | 小数 | 出力全体を`(text:strength)`形式で囲む。デフォルト1.0で変更なし |
+
+[追加テキストと強度](#追加テキストと強度v140)を参照してください。
+
 ## ノード出力
 
 | 出力 | 型 | 説明 |
 |--------|------|-------------|
-| `text` | STRING | 選択されたプリセットテキスト（wildcard展開済み） |
+| `text` | STRING | 選択されたプリセットテキスト（wildcard展開後、追加テキストと強度を適用） |
 | `preset_list` | STRING | すべての利用可能なプリセットの番号付きリスト（参照用） |
 | `selected_info` | STRING | 選択の詳細（インデックス、モード、フィルタ統計、wildcard展開情報） |
+| `keyword` | STRING | 選ばれたプリセットが実際にマッチしたキーワード（`_`で連結、v1.4.0）。[keyword出力](#keyword出力v140)を参照 |
 
 ## 使用例
 
@@ -797,6 +918,7 @@ Filtered: 24/96 presets
 - Sequential modeでwildcardもシーケンシャルに展開
 - `{__key__|__key__}`は同じYAMLファイル内のキーを参照（Multi-File版・Folder版では読み込んだ全ファイルを横断検索）
 - `__filename__`はpresetsとwildcardsフォルダの両方を検索
+- 追加テキスト欄でもwildcardが使える。プリセットは固定のまま、付け足す部分だけをランダムにしたいときに便利
 
 ### 複数ファイル・フォルダ検索のコツ
 - `enabled{n}`トグルを使えば、パスを入力し直さずにファイル組み合わせのA/Bテストが可能
@@ -831,9 +953,18 @@ A:
 **Q: Wildcardが展開されない？**
 A: 
 - `enable_wildcard`が`true`になっているか確認
-- Wildcard版ノード（"Prompt Preset Selector (Wildcard)"）を使用しているか確認
+- Wildcard対応のノードを使用しているか確認（基本版の"Prompt Preset Selector"はwildcardを展開しません）
 - `__filename__`の場合、ファイルがpresetsまたはwildcardsフォルダに存在するか確認
 - `{__key__|__key__}`の場合、キーが選択されたYAMLファイル内に存在するか確認
+- ComfyUIのコンソールを確認：`Wildcard file not found`や`Error reading wildcard file`が出ていれば、ファイルが見つからないか読めていません。何も出ていなければ、名前自体が認識されていません（スペースや使えない記号を含んでいる）
+- サブフォルダ内のファイルは、フォルダ名を含めて書く：`__portrait/lighting__`
+- ファイルはUTF-8で保存する。Shift-JIS（CP932）やUTF-16のファイルは読めません
+- Linux / macOSでは名前の大文字小文字を区別します：`__Colors__`では`colors.txt`は見つかりません
+- `__filename__`の対象は`.txt`のみです。同名の`.yaml`は使われません
+- `absolute_path`で読み込んだプリセットと同じフォルダは検索しません。wildcard用のファイルは`presets`か`wildcards`に置いてください
+
+**Q: 追加テキストや強度が反映されない？**
+A: `enable_additional_text`がONか、欄に`#`で始まらない行が1行以上あるかを確認してください。強度は1.0以外で、かつ出力が空でないときだけ適用されます。何が適用されたかは`selected_info`に表示されます。
 
 **Q: Wildcard選択肢がフィルタに含まれてしまう？**
 A: キーワードにコロン`:`を付けて検索してください。例：`heroes:`ではなく`heroes`で検索すると、`{__heroes__|...}`もマッチしてしまいます。コロンを付けることでキー階層として検索され、wildcard選択肢を除外できます。

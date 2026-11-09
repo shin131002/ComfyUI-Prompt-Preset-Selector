@@ -28,7 +28,7 @@ import random
 import re
 from pathlib import Path
 
-from .nodes import PromptPresetSelectorWithWildcard, YAML_AVAILABLE
+from .nodes import PromptPresetSelectorWithWildcard, YAML_AVAILABLE, YAML_SUFFIXES
 
 
 def merge_yaml_structures(structures):
@@ -45,24 +45,21 @@ def merge_yaml_structures(structures):
     return merged
 
 
-def strip_all_prefixes(text):
+def strip_source_prefix(text, prefix, is_yaml, strip_key_hierarchy):
     """
-    Like PromptPresetSelector.strip_key_hierarchy, but repeats until no
-    more "key: " style prefix remains. Needed here because a combined
-    line can carry two stacked prefixes, e.g.:
-        "colors.txt: camera_angles:close_up: front view"
-    -> strip "colors.txt: "            -> "camera_angles:close_up: front view"
-    -> strip "camera_angles:close_up: " -> "front view"
+    Turn a combined line back into prompt text:
+        "colors.txt: red"                                  -> "red"
+        "angles.yaml: camera_angles:close_up: front view"  -> "front view"
+        "notes.txt: style: watercolor"                     -> "style: watercolor"
+
+    Removes exactly the file prefix this node added, then the YAML key
+    hierarchy for lines that came from a YAML file. A .txt line is
+    preset text, so a "style: " at its start is kept. (The previous
+    strip_all_prefixes removed every leading "word: " and cut it.)
     """
-    while True:
-        parts = text.split(': ', 1)
-        if len(parts) == 2:
-            key_part = parts[0]
-            if ':' in key_part or (key_part and ' ' not in key_part):
-                text = parts[1]
-                continue
-        break
-    return text
+    if prefix and text.startswith(prefix):
+        text = text[len(prefix):]
+    return strip_key_hierarchy(text) if is_yaml else text
 
 
 def select_from_filtered(filtered_items, selection_mode, preset_index, seed, state_key, continue_state):
@@ -189,8 +186,9 @@ class MultiFilePromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelect
 
         return {"required": required}
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("text", "preset_list", "selected_info")
+    # keyword (v1.4.0) is appended last: saved workflows link outputs by slot index
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("text", "preset_list", "selected_info", "keyword")
     FUNCTION = "select_multi_preset"
     CATEGORY = "text"
     OUTPUT_NODE = False
@@ -256,14 +254,16 @@ class MultiFilePromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelect
         if not sources:
             msg = "No active files (enable a slot and set preset_file or absolute_path)"
             print(f"[Multi-File Preset Selector] Warning: {msg}")
-            return ("", "(No preset files selected)", msg)
+            return ("", "(No preset files selected)", msg, "")
 
         all_lines = []
         yaml_structures = []
+        line_sources = []  # (prefix, is_yaml) for each line of all_lines
         for path in sources:
             lines = self.load_preset_lines(path)
             prefix = f"{path.name}: "
             all_lines.extend(prefix + line for line in lines)
+            line_sources.extend([(prefix, path.suffix.lower() in YAML_SUFFIXES)] * len(lines))
             if path.suffix.lower() in ('.yaml', '.yml'):
                 data = self.load_yaml_structure(path)
                 if isinstance(data, dict):
@@ -272,7 +272,7 @@ class MultiFilePromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelect
         if not all_lines:
             warning = "All selected files are empty or failed to load"
             print(f"[Multi-File Preset Selector] Warning: {warning}")
-            return ("", f"({warning})", "")
+            return ("", f"({warning})", "", "")
 
         self._merged_yaml_data = merge_yaml_structures(yaml_structures) if yaml_structures else None
 
@@ -283,7 +283,7 @@ class MultiFilePromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelect
         if not filtered_items:
             warning = f"No presets match keywords: {keyword}"
             print(f"[Multi-File Preset Selector] Warning: {warning}")
-            return ("", preset_list, warning)
+            return ("", preset_list, warning, "")
 
         file_identifier = "|".join(str(p) for p in sources)
         state_key = f"{file_identifier}_{keyword}_{keyword_mode}"
@@ -297,7 +297,9 @@ class MultiFilePromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelect
                 f"Filtered: {len(filtered_items)}/{len(all_lines)} presets\n"
                 f"Sources: {', '.join(p.name for p in sources)}")
 
-        output_text = strip_all_prefixes(selected_text)
+        prefix, is_yaml = line_sources[original_index]
+        output_text = strip_source_prefix(selected_text, prefix, is_yaml, self.strip_key_hierarchy)
+        keyword_text = self.build_keyword_text(selected_text, include_keywords, keyword_mode)
 
         if enable_wildcard and output_text:
             original_text = output_text
@@ -307,7 +309,7 @@ class MultiFilePromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelect
                 mode_info = "sequential" if selection_mode in ["Sequential", "Sequential (continue)"] else "random"
                 info += f"\n[Wildcards expanded: {mode_info}]"
 
-        return (output_text, preset_list, info)
+        return (output_text, preset_list, info, keyword_text)
 
 
 class FolderPromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelectorWithWildcard):
@@ -345,8 +347,8 @@ class FolderPromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelectorW
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("text", "preset_list", "selected_info")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("text", "preset_list", "selected_info", "keyword")
     FUNCTION = "select_folder_preset"
     CATEGORY = "text"
     OUTPUT_NODE = False
@@ -397,24 +399,26 @@ class FolderPromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelectorW
         if not folder_path or not folder_path.strip():
             msg = "folder_path is empty"
             print(f"[Folder Preset Selector] Warning: {msg}")
-            return ("", "(No folder specified)", msg)
+            return ("", "(No folder specified)", msg, "")
 
         entries, err = self._collect_folder_files(folder_path, exclude_pattern)
         if err:
             print(f"[Folder Preset Selector] Warning: {err}")
-            return ("", "", err)
+            return ("", "", err, "")
 
         if not entries:
             warning = "No matching files found in folder"
             print(f"[Folder Preset Selector] Warning: {warning}")
-            return ("", f"({warning})", "")
+            return ("", f"({warning})", "", "")
 
         all_lines = []
         yaml_structures = []
+        line_sources = []  # (prefix, is_yaml) for each line of all_lines
         for rel, path in entries:
             lines = self.load_preset_lines(path)
             prefix = f"{rel}: "
             all_lines.extend(prefix + line for line in lines)
+            line_sources.extend([(prefix, path.suffix.lower() in YAML_SUFFIXES)] * len(lines))
             if path.suffix.lower() in ('.yaml', '.yml'):
                 data = self.load_yaml_structure(path)
                 if isinstance(data, dict):
@@ -423,7 +427,7 @@ class FolderPromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelectorW
         if not all_lines:
             warning = "All matching files are empty or failed to load"
             print(f"[Folder Preset Selector] Warning: {warning}")
-            return ("", f"({warning})", "")
+            return ("", f"({warning})", "", "")
 
         self._merged_yaml_data = merge_yaml_structures(yaml_structures) if yaml_structures else None
 
@@ -434,7 +438,7 @@ class FolderPromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelectorW
         if not filtered_items:
             warning = f"No presets match keywords: {keyword}"
             print(f"[Folder Preset Selector] Warning: {warning}")
-            return ("", preset_list, warning)
+            return ("", preset_list, warning, "")
 
         state_key = f"{folder_path.strip()}_{exclude_pattern}_{keyword}_{keyword_mode}"
 
@@ -447,7 +451,9 @@ class FolderPromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelectorW
                 f"Filtered: {len(filtered_items)}/{len(all_lines)} presets\n"
                 f"Files: {len(entries)} (folder: {folder_path.strip()})")
 
-        output_text = strip_all_prefixes(selected_text)
+        prefix, is_yaml = line_sources[original_index]
+        output_text = strip_source_prefix(selected_text, prefix, is_yaml, self.strip_key_hierarchy)
+        keyword_text = self.build_keyword_text(selected_text, include_keywords, keyword_mode)
 
         if enable_wildcard and output_text:
             original_text = output_text
@@ -457,7 +463,7 @@ class FolderPromptPresetSelector(_MergedYamlWildcardMixin, PromptPresetSelectorW
                 mode_info = "sequential" if selection_mode in ["Sequential", "Sequential (continue)"] else "random"
                 info += f"\n[Wildcards expanded: {mode_info}]"
 
-        return (output_text, preset_list, info)
+        return (output_text, preset_list, info, keyword_text)
 
 
 NODE_CLASS_MAPPINGS = {

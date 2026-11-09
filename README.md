@@ -9,7 +9,43 @@ A flexible ComfyUI node for selecting text presets from external files with adva
 ![Prompt Preset Selector (Multi-File, Wildcard)](./images/multi-file.webp)
 ![Prompt Preset Selector (Folder, Wildcard)](./images/folder.webp)
 
-## 🆕 New in v1.3.0 — Subfolder Support
+## 🆕 New in v1.4.0
+
+### Keyword Output
+
+Every node now has a **`keyword` output**: the keywords the selected preset actually matched, joined with `_`. AND mode gives all keywords (`front close-up` → `front_close-up`), OR mode gives the ones that matched (`front back` → `front` or `back`), and OFF mode gives an empty string. See [Keyword Output](#keyword-output-v140) for details.
+
+`keyword` is added as the last output, so **existing workflow connections keep working**. The preset that gets selected is the same as before.
+
+### Additional Text & Strength
+
+Every node now has three extra widgets at the bottom: an ON/OFF switch, an **additional text** field appended to the preset, and a **strength** value that wraps the whole output as `(text:strength)`. See [Additional Text & Strength](#additional-text--strength-v140).
+
+```
+preset:           masterpiece, 1girl
+additional_text:  smile (ON)
+strength:         1.5
+text output:      (masterpiece, 1girl, smile:1.5)
+```
+
+Wildcards (`__filename__`, `{A|B}`, `{__key__|__key__}`) can be used in the additional text as well.
+
+The defaults (OFF / empty / 1.0) leave the output unchanged, so existing workflows behave exactly as before.
+
+### Wildcard Fixes
+
+`__filename__` wildcards that were silently left unexpanded now work:
+
+- **Subfolders**: `__portrait/lighting__` (as documented in v1.3.0, but it didn't actually expand). `\` also works as a separator
+- **Non-ASCII names**: `__髪型__` and other Japanese / Unicode file names
+- **Impact Pack folder name**: the wildcards folder is found even when Impact Pack is installed as `comfyui-impact-pack` (lowercase, as the Registry / Manager may name it). Previously this broke on Linux / macOS
+- **UTF-8 with BOM**: a `# comment` on the first line is now ignored (in preset files as well as wildcard files)
+- **Indented comments**: `  # comment` in a wildcard file is treated as a comment, as it already was in preset files
+- **Adjacent wildcards**: `__a____b__` is read as two wildcards
+
+`__../xxx__` style names that point outside `presets` / `wildcards` are refused. Ordinary wildcards expand exactly as before.
+
+## New in v1.3.0 — Subfolder Support
 
 **The preset dropdown now reads subfolders.** Until v1.2.0 only files sitting directly inside the `presets` and `wildcards` folders appeared in the list. You can now organise presets into folders and pick them from the same dropdown:
 
@@ -35,8 +71,10 @@ If your `presets` or `wildcards` folder already contained subfolders, those file
 - 🌐 **Absolute Path Support**: Use files from anywhere on your system
 - 📝 **Multiple YAML Formats**: Supports list, nested dict, and flat formats
 - 🔍 **Advanced Keyword Filtering**: Include/exclude keywords with phrase support
+- 🏷️ **Keyword Output**: Outputs the keywords the selected preset matched, in a form you can use directly in a file name
 - 🎲 **Multiple Selection Modes**: Manual, Sequential, Sequential (continue), Random
 - 🎰 **Wildcard Expansion**: Supports `{A|B|C}`, `__filename__`, and `{__key__|__key__}` syntax
+- ➕ **Additional Text & Strength**: Append extra text and apply a weight to the whole output without editing the preset file
 - 🔄 **ComfyUI-Impact-Pack Integration**: Compatible with wildcards folder
 - 📝 **Easy Editing**: Edit presets with any text editor - no need to touch Python code
 - 🗂️ **Multiple Preset Files**: Organize presets by category
@@ -311,6 +349,14 @@ File search order:
 1. `presets/colors.txt`
 2. `wildcards/colors.txt` (if not found in presets)
 
+Name rules:
+- Write the name without `.txt`. Only `.txt` files are used (not `.yaml`)
+- Files in a subfolder: include the folder, `__portrait/lighting__` (`\` also works)
+- Letters, digits, `_`, `-`, `.` and non-ASCII characters (e.g. Japanese) can be used. Spaces and other symbols cannot
+- Names are case-sensitive on Linux / macOS
+- `..` and drive letters are not allowed; wildcards only read from `presets` and `wildcards`
+- Files must be UTF-8 (with or without BOM). Lines starting with `#` (leading spaces allowed) are comments
+
 ##### 3. YAML Key Selection: `{__key1__|__key2__}`
 Select content from keys within a YAML file (Impact Pack format):
 
@@ -512,6 +558,70 @@ camera_angles: -wide_shot:  → Key filter + key exclusion
 | `lighting: -dramatic:` | AND | lighting key presets, excluding dramatic key |
 | `heroes:` | AND | Only heroes key (excludes wildcard choice `{__heroes__|...}`) |
 
+#### Keyword Output (v1.4.0)
+
+Outputs the keywords the selected preset actually matched, joined with `_` (all nodes, last output).
+
+| Keyword | Mode | Selected line | `keyword` output |
+|---------|------|--------|--------|
+| `front close-up` | AND | `front view, close-up` | `front_close-up` |
+| `front back` | OR | `front view, close-up` | `front` |
+| `front back` | OR | `back view, wide shot` | `back` |
+| `"front view" close-up` | AND | `front view, close-up` | `front_view_close-up` |
+| `front -wide` | AND | `front view, close-up` | `front` |
+| `camera_angles:close_up:` | AND | `camera_angles:close_up: front view` | `camera_angles_close_up` |
+| `front` | OFF | (any) | (empty) |
+
+- Spaces inside a phrase also become `_`
+- Exclude keywords (`-wide` etc.) are never output
+- `:` in YAML key searches becomes `_`, and a trailing `:` is dropped (so the text works in a file name)
+- In OR mode, if the selected line contains several of the keywords, all of them are joined in input order (e.g. `front_back`)
+- Keywords are output with the case you typed (matching itself ignores case)
+- In the Multi-File and Folder nodes, the file name at the start of each line (`angles.txt: ` etc.) is matched too
+- Empty when `keyword_mode` is OFF, when there are no include keywords, or when no preset matched
+
+### Additional Text & Strength (v1.4.0)
+
+Three widgets at the bottom of every node:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `enable_additional_text` | Boolean | ON/OFF switch for `additional_text` (default: OFF) |
+| `additional_text` | String (multiline) | Appended to the preset as `preset, additional_text` when ON |
+| `strength` | Float | Wraps the whole output as `(text:strength)`. Default 1.0 = no change (range 0–10) |
+
+Processing order: preset selection → wildcard expansion → additional text (with its own wildcards expanded) → strength.
+
+**additional_text rules**
+- Lines starting with `#` (leading spaces allowed) are comments and are ignored. A `#` in the middle of a line is kept as text
+- Empty lines are ignored; the remaining lines are joined with `, `
+- A trailing comma on the preset or on a line is removed first, so you never get `,,`
+- If every line is a comment, nothing is appended
+- Turning the switch OFF keeps the text in the field, so you can toggle it per run
+
+**Wildcards in additional_text**
+- `__filename__`, `{A|B|C}` and `{__key__|__key__}` are expanded with the same rules as the preset, following `enable_wildcard` and `selection_mode`
+- Random picks use a seed derived from `seed`: reproducible with the same seed, but independent of the preset's own wildcards (so `{red|blue}` in both places doesn't always pick the same option)
+- In Sequential modes the additional text's wildcards cycle on each run
+- `{__key__|__key__}` looks up keys in the selected YAML preset file (Multi-File / Folder nodes: all loaded files)
+- Comment lines are removed before expansion, so a commented-out wildcard has no effect
+- The basic "Prompt Preset Selector" node does not expand wildcards, here or in presets
+
+```
+# memo: seasonal extras
+smile,
+  # blue sky   ← ignored
+cherry blossoms
+```
+→ `masterpiece, 1girl, smile, cherry blossoms`
+
+**strength rules**
+- 1.0 leaves the output unchanged
+- In ComfyUI's prompt syntax nested weights multiply, so weights already in the preset are scaled: `(red:1.2), dress` with strength 1.5 → red 1.8, dress 1.5
+- Not applied when the output is empty
+
+`selected_info` shows `[Additional text appended]` / `[Wildcards expanded in additional text]` / `[Strength: 1.5]` when they were applied. The `keyword` output is not affected.
+
 ### Creating Custom Presets
 
 #### Text Files (.txt)
@@ -621,13 +731,24 @@ All parameters from the basic version, plus:
 | `seed` | Integer | Random seed for reproducible random selection |
 | `enable_wildcard` | Boolean | Enable/disable wildcard expansion (default: true) |
 
+### Common Parameters (all nodes, v1.4.0)
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `enable_additional_text` | Boolean | ON/OFF switch for `additional_text` (default: OFF) |
+| `additional_text` | String | Appended to the output when ON. Lines starting with `#` are comments. Wildcards are expanded |
+| `strength` | Float | Wraps the whole output as `(text:strength)`. Default 1.0 = no change |
+
+See [Additional Text & Strength](#additional-text--strength-v140).
+
 ## Node Outputs
 
 | Output | Type | Description |
 |--------|------|-------------|
-| `text` | STRING | The selected preset text (with wildcards expanded) |
+| `text` | STRING | The selected preset text (wildcards expanded, then additional text and strength applied) |
 | `preset_list` | STRING | Numbered list of all available presets (for reference) |
 | `selected_info` | STRING | Details about selection (index, mode, filter stats, wildcard expansion info) |
+| `keyword` | STRING | The keywords the selected preset actually matched, joined with `_` (v1.4.0). See [Keyword Output](#keyword-output-v140) |
 
 ## Example Use Cases
 
@@ -797,6 +918,7 @@ For random selection:
 - Sequential mode expands wildcards sequentially too
 - `{__key__|__key__}` references keys within the same YAML file (in the Multi-File and Folder nodes, it searches across all loaded files)
 - `__filename__` searches both presets and wildcards folders
+- Wildcards work in the additional text too — handy for keeping the preset fixed and randomising only what you add
 
 ### Multi-File and Folder Tips
 - Use the `enabled{n}` toggles to A/B test file combinations without retyping paths
@@ -831,9 +953,18 @@ A:
 **Q: Wildcards not expanding?**
 A: 
 - Check that `enable_wildcard` is set to `true`
-- Make sure you're using the Wildcard version node ("Prompt Preset Selector (Wildcard)")
+- Make sure you're using a wildcard-capable node (the basic "Prompt Preset Selector" does not expand wildcards)
 - For `__filename__`, verify the file exists in presets or wildcards folder
 - For `{__key__|__key__}`, verify the keys exist in the selected YAML file
+- Check the ComfyUI console: `Wildcard file not found` or `Error reading wildcard file` means the file was not found or could not be read; no message at all means the name itself was not recognised (spaces or unsupported symbols)
+- For a file in a subfolder, include the folder: `__portrait/lighting__`
+- Save the file as UTF-8. Shift-JIS (CP932) or UTF-16 files cannot be read
+- The name is case-sensitive on Linux / macOS: `__Colors__` does not find `colors.txt`
+- Only `.txt` files are used for `__filename__`; a `.yaml` with the same name is not
+- Files next to a preset loaded via `absolute_path` are not searched; put wildcard files in `presets` or `wildcards`
+
+**Q: The additional text or strength isn't applied?**
+A: Check that `enable_additional_text` is ON and that the field has at least one line not starting with `#`. Strength is only applied when it isn't 1.0 and the output isn't empty. `selected_info` shows what was applied.
 
 **Q: Wildcard choice lines included in filter results?**
 A: Include the colon `:` in your keyword search. For example, searching for `heroes` will also match `{__heroes__|...}`, but searching for `heroes:` will only match actual key hierarchies and exclude wildcard choice lines.

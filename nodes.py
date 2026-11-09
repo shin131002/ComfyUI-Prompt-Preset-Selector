@@ -26,6 +26,57 @@ except ImportError:
     print("  Install with: pip install pyyaml --break-system-packages")
 
 
+# Text files are read as utf-8-sig: identical to utf-8 for files without a
+# BOM, and strips the BOM that some Windows editors add, which otherwise
+# sticks to the first line (a "# comment" there stopped being a comment).
+TEXT_ENCODING = 'utf-8-sig'
+
+# Only these files hold YAML structure ({__key__|__key__} keys, [image]
+# folders). A .txt preset used to be parsed as YAML too, which printed a
+# parse error on every run when a line started with "{" (e.g. "{red|blue}").
+YAML_SUFFIXES = ('.yaml', '.yml')
+
+# Image node syntax: a YAML key "heroes[hero_poses]" links its presets to
+# the images/hero_poses folder. The part in brackets is not part of the
+# key's name, so {__heroes__} must still find it.
+IMAGE_FOLDER_SUFFIX = re.compile(r'^(.+?)\[(.+?)\]$')
+
+
+def yaml_key_name(key):
+    """YAML key without its [image_folder] suffix: "heroes[poses]" -> "heroes"."""
+    key = str(key)
+    match = IMAGE_FOLDER_SUFFIX.match(key)
+    return match.group(1).strip() if match else key
+
+
+# __name__ file wildcards. \w is Unicode-aware, so Japanese names work;
+# "/" (or "\\") selects a subfolder: __portrait/lighting__.
+# Non-greedy so that __a____b__ is read as two wildcards, not one.
+FILE_WILDCARD_PATTERN = re.compile(r'__([\w\-./\\]+?)__')
+
+
+def find_impact_wildcard_dir(base_dir):
+    """
+    Locate ComfyUI-Impact-Pack/wildcards next to this node's folder.
+
+    The folder name depends on how Impact Pack was installed: a git clone
+    gives "ComfyUI-Impact-Pack", the ComfyUI Registry / Manager can give
+    "comfyui-impact-pack". Matching it case-insensitively keeps Linux and
+    macOS working (Windows already ignored case).
+    """
+    custom_nodes = Path(base_dir).resolve().parent
+    exact = custom_nodes / "ComfyUI-Impact-Pack" / "wildcards"
+    if exact.is_dir():
+        return exact
+    try:
+        for d in sorted(custom_nodes.iterdir()):
+            if d.is_dir() and d.name.lower() == "comfyui-impact-pack" and (d / "wildcards").is_dir():
+                return d / "wildcards"
+    except OSError:
+        pass
+    return None
+
+
 class PromptPresetSelector:
     """
     Enhanced preset selector with keyword filtering and multiple selection modes
@@ -58,8 +109,9 @@ class PromptPresetSelector:
             }
         }
     
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("text", "preset_list", "selected_info")
+    # keyword (v1.4.0) is appended last: saved workflows link outputs by slot index
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("text", "preset_list", "selected_info", "keyword")
     FUNCTION = "select_preset"
     CATEGORY = "text"
     OUTPUT_NODE = False
@@ -123,15 +175,8 @@ class PromptPresetSelector:
     
     def _get_wildcard_dir(self):
         """Get the wildcard directory path (for Impact Pack compatibility)"""
-        base_dir = Path(__file__).parent
-        wildcard_path = base_dir / "../ComfyUI-Impact-Pack/wildcards"
-        
         try:
-            wildcard_path = wildcard_path.resolve()
-            if wildcard_path.exists():
-                return wildcard_path
-            else:
-                return None
+            return find_impact_wildcard_dir(Path(__file__).parent)
         except Exception:
             return None
     
@@ -187,7 +232,7 @@ class PromptPresetSelector:
             
             # Handle TXT files
             elif suffix == '.txt':
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, 'r', encoding=TEXT_ENCODING) as f:
                     lines = []
                     for line in f:
                         stripped = line.strip()
@@ -213,7 +258,7 @@ class PromptPresetSelector:
         Returns list of strings (for dict format, includes "key1:key2: text" format)
         """
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding=TEXT_ENCODING) as f:
                 data = yaml.safe_load(f)
             
             if data is None:
@@ -352,6 +397,37 @@ class PromptPresetSelector:
         
         return filtered
     
+    def build_keyword_text(self, selected_line, include_keywords, mode):
+        """
+        Text for the `keyword` output: the include keywords the selected
+        preset actually matched, joined with "_" (exclude keywords never
+        appear). Matching uses the same line the filter saw, YAML key
+        hierarchy / file prefix included.
+        
+          AND: all include keywords          front close-up -> front_close-up
+          OR:  only the ones that hit        front back     -> front or back
+          OFF: always empty
+        
+        Spaces, commas and colons inside a keyword also become "_" and are
+        trimmed from the ends, so the text is safe in a file name:
+          "front view" -> front_view,  camera_angles:close_up: -> camera_angles_close_up
+        Case is kept as typed; duplicates are dropped.
+        """
+        if mode == "OFF" or not include_keywords or not selected_line:
+            return ""
+        line_lower = selected_line.lower()
+        hits, seen = [], set()
+        for kw in include_keywords:
+            key = kw.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if key in line_lower:
+                label = re.sub(r'[\s,:]+', '_', kw).strip('_')
+                if label:
+                    hits.append(label)
+        return "_".join(hits)
+    
     def generate_preset_list(self, lines):
         """Generate numbered list of all presets"""
         if not lines:
@@ -396,18 +472,18 @@ class PromptPresetSelector:
             if not os.path.exists(file_to_load):
                 error_msg = f"Absolute path not found: {file_to_load}"
                 print(f"[Prompt Preset Selector] Error: {error_msg}")
-                return ("", "", error_msg)
+                return ("", "", error_msg, "")
             
             # Validate file extension
             if not file_to_load.lower().endswith(('.txt', '.yaml', '.yml')):
                 error_msg = f"Unsupported file type. Use .txt, .yaml, or .yml: {file_to_load}"
                 print(f"[Prompt Preset Selector] Error: {error_msg}")
-                return ("", "", error_msg)
+                return ("", "", error_msg, "")
         else:
             # Use preset_file from dropdown
             if preset_file == "(No preset files found)":
                 print("[Prompt Preset Selector] Warning: No preset files available")
-                return ("", "(No preset files found)", "")
+                return ("", "(No preset files found)", "", "")
             
             file_to_load = preset_file
             file_identifier = preset_file
@@ -416,7 +492,7 @@ class PromptPresetSelector:
         all_lines = self.load_preset_lines(file_to_load)
         if not all_lines:
             print(f"[Prompt Preset Selector] Warning: Preset file '{file_identifier}' is empty or failed to load")
-            return ("", "(File is empty or failed to load)", "")
+            return ("", "(File is empty or failed to load)", "", "")
         
         # Generate full preset list (for reference)
         preset_list = self.generate_preset_list(all_lines)
@@ -429,7 +505,7 @@ class PromptPresetSelector:
         if not filtered_items:
             warning = f"No presets match keywords: {keyword}"
             print(f"[Prompt Preset Selector] Warning: {warning}")
-            return ("", preset_list, warning)
+            return ("", preset_list, warning, "")
         
         # State key for Sequential (continue) mode
         state_key = f"{file_identifier}_{keyword}_{keyword_mode}"
@@ -475,9 +551,16 @@ class PromptPresetSelector:
         
         # Strip key hierarchy from text output (for actual prompt use)
         # Keep full text with keys in preset_list and info (for reference)
-        output_text = self.strip_key_hierarchy(selected_text)
+        # Only YAML lines carry a key hierarchy. A .txt line such as
+        # "style: watercolor" is preset text and is output as written
+        # (it used to lose its "style: ").
+        if Path(file_to_load).suffix.lower() in YAML_SUFFIXES:
+            output_text = self.strip_key_hierarchy(selected_text)
+        else:
+            output_text = selected_text
+        keyword_text = self.build_keyword_text(selected_text, include_keywords, keyword_mode)
         
-        return (output_text, preset_list, info)
+        return (output_text, preset_list, info, keyword_text)
 
 
 class PromptPresetSelectorWithWildcard(PromptPresetSelector):
@@ -507,11 +590,11 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
         
         # Normalize path
         try:
-            wildcard_path = wildcard_path.resolve()
-            if wildcard_path.exists():
-                return wildcard_path
+            found = find_impact_wildcard_dir(base_dir)
+            if found:
+                return found
             else:
-                print(f"[Wildcard Preset Selector] Warning: Wildcard directory not found: {wildcard_path}")
+                print(f"[Wildcard Preset Selector] Warning: Wildcard directory not found: {wildcard_path.resolve()}")
                 return None
         except Exception as e:
             print(f"[Wildcard Preset Selector] Error resolving wildcard path: {e}")
@@ -528,11 +611,11 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
         if file_path_str in self._yaml_structure_cache:
             return self._yaml_structure_cache[file_path_str]
         
-        if not YAML_AVAILABLE:
+        if not YAML_AVAILABLE or Path(file_path).suffix.lower() not in YAML_SUFFIXES:
             return None
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding=TEXT_ENCODING) as f:
                 data = yaml.safe_load(f)
             
             if data is None:
@@ -551,24 +634,24 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
         Get content from a YAML key - FIXED to handle nested structures
         Returns a list of items under that key, searching recursively
         """
-        if not yaml_data:
+        if not yaml_data or not isinstance(yaml_data, dict):
             return []
         
-        # First try to find the key at the top level
-        if isinstance(yaml_data, dict) and key in yaml_data:
-            content = yaml_data[key]
-            return self._extract_content_from_value(content)
+        # First try to find the key at this level: the exact key, then a
+        # key that only differs by an [image_folder] suffix
+        # ({__heroes__} -> "heroes[hero_poses]:")
+        if key in yaml_data:
+            return self._extract_content_from_value(yaml_data[key])
+        for k, v in yaml_data.items():
+            if yaml_key_name(k) == key:
+                return self._extract_content_from_value(v)
         
-        # If not found at top level, search recursively
-        if isinstance(yaml_data, dict):
-            for k, v in yaml_data.items():
-                if k == key:
-                    return self._extract_content_from_value(v)
-                # Recursively search in nested dicts
-                if isinstance(v, dict):
-                    result = self.get_yaml_key_content(v, key)
-                    if result:
-                        return result
+        # If not found at this level, search recursively
+        for k, v in yaml_data.items():
+            if isinstance(v, dict):
+                result = self.get_yaml_key_content(v, key)
+                if result:
+                    return result
         
         return []
     
@@ -612,8 +695,8 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
             }
         }
     
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("text", "preset_list", "selected_info")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("text", "preset_list", "selected_info", "keyword")
     FUNCTION = "select_preset_with_wildcard"
     CATEGORY = "text"
     
@@ -736,30 +819,20 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
         1. presets directory
         2. wildcards directory (Impact Pack)
         """
-        # Pattern: __filename__
-        pattern = r'__([a-zA-Z0-9_-]+)__'
-        
         def replace_file_wildcard(match):
-            filename = match.group(1)
-            filepath = None
-            
-            # Try presets directory first
-            preset_path = self.preset_dir / f"{filename}.txt"
-            if preset_path.exists():
-                filepath = preset_path
-            # Then try wildcards directory
-            elif self.wildcard_dir:
-                wildcard_path = self.wildcard_dir / f"{filename}.txt"
-                if wildcard_path.exists():
-                    filepath = wildcard_path
+            filename = match.group(1).replace('\\', '/').strip('/')
+            filepath = self._resolve_wildcard_file(filename)
             
             if not filepath:
                 print(f"[Wildcard Preset Selector] Warning: Wildcard file not found: {filename}.txt")
                 return match.group(0)  # Return original if file not found
             
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+                with open(filepath, 'r', encoding=TEXT_ENCODING) as f:
+                    # strip before the # test, as load_preset_lines does, so an
+                    # indented "  # comment" is still a comment
+                    lines = [line.strip() for line in f
+                             if line.strip() and not line.strip().startswith('#')]
                 
                 if not lines:
                     print(f"[Wildcard Preset Selector] Warning: Wildcard file is empty: {filepath}")
@@ -786,7 +859,30 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
                 print(f"[Wildcard Preset Selector] Error reading wildcard file {filepath}: {e}")
                 return match.group(0)
         
-        return re.sub(pattern, replace_file_wildcard, text)
+        return FILE_WILDCARD_PATTERN.sub(replace_file_wildcard, text)
+    
+    def _resolve_wildcard_file(self, filename):
+        """
+        Path of the .txt file for __filename__, or None.
+        Searches presets first, then the Impact Pack wildcards folder.
+        filename may contain subfolders ("portrait/lighting"); ".." and
+        drive letters are refused so a wildcard can't point outside those
+        two folders. Symlinked subfolders inside them still work.
+        """
+        parts = filename.split('/')
+        if not filename or any(p in ('', '.', '..') for p in parts) or ':' in parts[0]:
+            return None
+        
+        for base in (self.preset_dir, self.wildcard_dir):
+            if not base:
+                continue
+            candidate = base / f"{filename}.txt"
+            try:
+                if candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
+        return None
     
     def _expand_choice_wildcards(self, text, is_sequential, state_key):
         """Expand {A|B|C} wildcards with nesting support"""
@@ -841,7 +937,7 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
         """Main selection logic with wildcard expansion support"""
         
         # First, use parent class to select preset
-        text, preset_list, info = self.select_preset(
+        text, preset_list, info, keyword_text = self.select_preset(
             preset_file, absolute_path, keyword, keyword_mode, 
             selection_mode, preset_index, seed
         )
@@ -886,7 +982,7 @@ class PromptPresetSelectorWithWildcard(PromptPresetSelector):
                 mode_info = "sequential" if selection_mode in ["Sequential", "Sequential (continue)"] else "random"
                 info += f"\n[Wildcards expanded: {mode_info}]"
         
-        return (text, preset_list, info)
+        return (text, preset_list, info, keyword_text)
 
 
 class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
@@ -927,8 +1023,8 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
             }
         }
     
-    RETURN_TYPES = ("STRING", "IMAGE", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("text", "image", "image_path", "preset_list", "selected_info")
+    RETURN_TYPES = ("STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("text", "image", "image_path", "preset_list", "selected_info", "keyword")
     FUNCTION = "select_preset_with_image"
     CATEGORY = "promptPresetSelector"
     
@@ -1102,10 +1198,14 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
             if self.DEBUG: print("[DEBUG YAML] PyYAML not available")
             return None
         
+        if Path(file_path).suffix.lower() not in YAML_SUFFIXES:
+            if self.DEBUG: print("[DEBUG YAML] Not a YAML file, no image folder")
+            return None
+        
         if self.DEBUG: print(f"[DEBUG YAML] Processing line: '{selected_line}'")
         
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, 'r', encoding=TEXT_ENCODING) as f:
                 yaml_data = yaml.safe_load(f)
             
             if self.DEBUG: print(f"[DEBUG YAML] YAML data keys: {list(yaml_data.keys()) if isinstance(yaml_data, dict) else 'not a dict'}")
@@ -1182,7 +1282,7 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
                                  selection_mode, preset_index, seed, enable_wildcard, image_index):
         """
         Main selection logic with image support
-        Returns: (text, image, image_path, preset_list, selected_info)
+        Returns: (text, image, image_path, preset_list, selected_info, keyword)
         """
         
         # Determine file path
@@ -1211,12 +1311,17 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
         else:
             file_to_load_full = file_to_load
         
-        # Get filtered lines (before wildcard expansion)
-        filtered_lines_raw = self.load_preset_lines(file_to_load)
-        
-        if keyword_mode != "OFF" and keyword:
-            include_keywords, exclude_keywords = self.parse_keywords(keyword)
-            filtered_lines_raw = self.filter_by_keywords(filtered_lines_raw, include_keywords, exclude_keywords, keyword_mode)
+        # Get filtered lines (before wildcard expansion), filtered exactly like
+        # select_preset so the image follows the same line as `text`:
+        # - exclusions apply in OFF mode too (they used to be skipped here, so
+        #   `-wide` with OFF picked the image of a different line)
+        # - filter_by_keywords returns (index, line) tuples; keep only the line
+        #   (the tuple used to reach the YAML lookup, so no image was ever found
+        #   while a keyword filter was active)
+        all_raw_lines = self.load_preset_lines(file_to_load)
+        include_keywords, exclude_keywords = self.parse_keywords(keyword)
+        filtered_lines_raw = [line for _, line in self.filter_by_keywords(
+            all_raw_lines, include_keywords, exclude_keywords, keyword_mode)]
         
         # Determine selected index (replicate parent class logic)
         if not filtered_lines_raw:
@@ -1273,7 +1378,7 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
         if self.DEBUG: print(f"[DEBUG] Image folder from YAML keys: {selected_image_folder}")
         
         # Now get the expanded text from parent class
-        text, preset_list, info = self.select_preset_with_wildcard(
+        text, preset_list, info, keyword_text = self.select_preset_with_wildcard(
             preset_file, absolute_path, keyword, keyword_mode,
             selection_mode, preset_index, seed, enable_wildcard
         )
@@ -1303,7 +1408,7 @@ class PromptPresetSelectorWithImage(PromptPresetSelectorWithWildcard):
             image_path_str = "No image"
             info += "\nSelected Image: None (no image folder specified)"
         
-        return (text, image_tensor, image_path_str, preset_list, info)
+        return (text, image_tensor, image_path_str, preset_list, info, keyword_text)
 
 
 # Register the node
